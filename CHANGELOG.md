@@ -11,3 +11,4 @@
 - Adds Windows portable packaging script.
 - Adds Inno Setup installer script.
 - Adds GitHub Actions release workflow.
+- Updates GitHub Actions and Rust dependencies after first Dependabot scan.

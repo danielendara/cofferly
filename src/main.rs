@@ -23,7 +23,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(|cc| Box::new(AirWalletApp::new(cc))),
+        Box::new(|cc| Ok(Box::new(AirWalletApp::new(cc)))),
     )
 }
 
@@ -302,13 +302,13 @@ impl AirWalletApp {
 }
 
 impl eframe::App for AirWalletApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if !self.parent_unlocked {
-            self.lock_screen(ctx);
+            self.lock_screen(ui);
             return;
         }
 
-        egui::TopBottomPanel::top("header").show(ctx, |ui| {
+        egui::Panel::top("header").show_inside(ui, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.heading(RichText::new(APP_NAME).size(30.0));
@@ -323,10 +323,10 @@ impl eframe::App for AirWalletApp {
             ui.add_space(8.0);
         });
 
-        egui::SidePanel::left("wallet_picker")
+        egui::Panel::left("wallet_picker")
             .resizable(false)
-            .min_width(210.0)
-            .show(ctx, |ui| {
+            .min_size(210.0)
+            .show_inside(ui, |ui| {
                 ui.add_space(10.0);
                 ui.label(RichText::new("Wallets").strong().size(18.0));
                 ui.add_space(8.0);
@@ -341,7 +341,7 @@ impl eframe::App for AirWalletApp {
                     );
 
                     if ui
-                        .add_sized([180.0, 66.0], egui::SelectableLabel::new(selected, label))
+                        .add_sized([180.0, 66.0], egui::Button::selectable(selected, label))
                         .clicked()
                     {
                         self.selected_wallet = index;
@@ -377,7 +377,7 @@ impl eframe::App for AirWalletApp {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             self.wallet_header(ui);
             ui.add_space(14.0);
             self.quick_actions(ui);
@@ -394,8 +394,8 @@ impl eframe::App for AirWalletApp {
 }
 
 impl AirWalletApp {
-    fn lock_screen(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn lock_screen(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
                 ui.label(RichText::new(APP_NAME).size(42.0).strong());
@@ -834,11 +834,11 @@ fn escape_html(input: &str) -> String {
 }
 
 fn configure_style(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.visuals.widgets.active.bg_fill = Color32::from_rgb(36, 87, 122);
     style.visuals.selection.bg_fill = Color32::from_rgb(36, 87, 122);
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 fn app_icon() -> egui::IconData {
