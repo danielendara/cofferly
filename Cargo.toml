@@ -1,0 +1,25 @@
+[package]
+name = "airwallet"
+version = "0.1.0"
+edition = "2021"
+description = "A simple local allowance wallet for kids."
+license = "MIT"
+repository = "https://github.com/danielendara/airwallet"
+
+[[bin]]
+name = "AirWallet"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+eframe = "0.27"
+egui_extras = "0.27"
+opener = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1

@@ -1,0 +1,7 @@
+/target/
+/dist/
+/.idea/
+/.vscode/
+*.pdb
+*.exe
+airwallet-data.json
