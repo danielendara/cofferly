@@ -133,8 +133,7 @@ impl AirWalletApp {
 
         self.data.parent_pin = self.new_pin_input.clone();
         self.new_pin_input.clear();
-        self.save();
-        self.status = "Parent PIN updated.".to_owned();
+        self.save_with_success("Parent PIN updated.");
     }
 
     fn add_entry(&mut self) {
@@ -157,10 +156,20 @@ impl AirWalletApp {
             return;
         }
 
+        let action = match self.draft.kind {
+            EntryKind::Deposit => "Added",
+            EntryKind::Deduction => "Deducted",
+        };
         let signed_amount = match self.draft.kind {
             EntryKind::Deposit => amount,
             EntryKind::Deduction => -amount,
         };
+        let wallet_name = self.selected_wallet().child_name.clone();
+        let status = format!(
+            "{action} {} for {}: {description}.",
+            format_money(amount),
+            wallet_name
+        );
 
         self.selected_wallet_mut().entries.push(Entry {
             date: Local::now().date_naive(),
@@ -170,7 +179,7 @@ impl AirWalletApp {
 
         self.draft.description.clear();
         self.draft.amount.clear();
-        self.save();
+        self.save_with_success(status);
     }
 
     fn quick_entry(&mut self, description: &str, amount_cents: i64, kind: EntryKind) {
@@ -193,9 +202,14 @@ impl AirWalletApp {
             }
         };
 
+        let wallet_name = self.selected_wallet().child_name.clone();
         self.selected_wallet_mut().starting_balance_cents = balance;
         self.starting_balance_input.clear();
-        self.save();
+        self.save_with_success(format!(
+            "Updated {} starting balance to {}.",
+            wallet_name,
+            format_money(balance)
+        ));
     }
 
     fn rename_selected_child(&mut self) {
@@ -210,9 +224,10 @@ impl AirWalletApp {
             return;
         }
 
-        self.selected_wallet_mut().child_name = name;
+        let old_name = self.selected_wallet().child_name.clone();
+        self.selected_wallet_mut().child_name = name.clone();
         self.child_name_input.clear();
-        self.save();
+        self.save_with_success(format!("Renamed {old_name} to {name}."));
     }
 
     fn add_child_wallet(&mut self) {
@@ -228,13 +243,13 @@ impl AirWalletApp {
         }
 
         self.data.wallets.push(Wallet {
-            child_name: name,
+            child_name: name.clone(),
             starting_balance_cents: 0,
             entries: Vec::new(),
         });
         self.selected_wallet = self.data.wallets.len() - 1;
         self.new_child_name_input.clear();
-        self.save();
+        self.save_with_success(format!("Added wallet for {name}."));
     }
 
     fn remove_latest_entry(&mut self) {
@@ -243,8 +258,14 @@ impl AirWalletApp {
             return;
         }
 
-        if self.selected_wallet_mut().entries.pop().is_some() {
-            self.save();
+        let wallet_name = self.selected_wallet().child_name.clone();
+        if let Some(entry) = self.selected_wallet_mut().entries.pop() {
+            self.save_with_success(format!(
+                "Removed latest entry from {}: {} {}.",
+                wallet_name,
+                format_money(entry.amount_cents),
+                entry.description
+            ));
         } else {
             self.status = "There are no entries to remove.".to_owned();
         }
@@ -293,9 +314,9 @@ impl AirWalletApp {
             .join(file_name)
     }
 
-    fn save(&mut self) {
+    fn save_with_success(&mut self, success_status: impl Into<String>) {
         match save_app_data(&self.data_path, &self.data) {
-            Ok(()) => self.status = format!("Saved to {}", self.data_path.display()),
+            Ok(()) => self.status = success_status.into(),
             Err(err) => self.status = format!("Could not save: {err}"),
         }
     }
@@ -784,13 +805,46 @@ td:last-child, th:last-child, td:nth-child(3), th:nth-child(3) {{ text-align: ri
 }
 
 fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
-    let trimmed = input.trim().trim_start_matches('$');
-    let (dollars, cents) = match trimmed.split_once('.') {
-        Some((dollars, cents)) => (dollars, cents),
-        None => (trimmed, "0"),
+    let trimmed = input.trim();
+    let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed).trim();
+    if trimmed.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    let (negative, amount) = match trimmed.strip_prefix('-') {
+        Some(amount) => (true, amount),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
     };
 
-    let dollars = dollars.parse::<i64>().map_err(|err| err.to_string())?;
+    if amount.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    let (dollars, cents) = match amount.split_once('.') {
+        Some((dollars, cents)) => {
+            if cents.contains('.') {
+                return Err("Use only one decimal point.".to_owned());
+            }
+            (dollars, cents)
+        }
+        None => (amount, "0"),
+    };
+
+    if dollars.is_empty() && cents.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    if !dollars.chars().all(|character| character.is_ascii_digit())
+        || !cents.chars().all(|character| character.is_ascii_digit())
+    {
+        return Err("Use digits and at most one decimal point.".to_owned());
+    }
+
+    let dollars = if dollars.is_empty() {
+        0
+    } else {
+        dollars.parse::<i64>().map_err(|err| err.to_string())?
+    };
     let cents = match cents.len() {
         0 => 0,
         1 => cents.parse::<i64>().map_err(|err| err.to_string())? * 10,
@@ -798,7 +852,18 @@ fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
         _ => return Err("Use at most two decimal places.".to_owned()),
     };
 
-    Ok(dollars * 100 + cents)
+    let amount = dollars
+        .checked_mul(100)
+        .and_then(|dollars| dollars.checked_add(cents))
+        .ok_or_else(|| "Amount is too large.".to_owned())?;
+
+    if negative {
+        amount
+            .checked_neg()
+            .ok_or_else(|| "Amount is too large.".to_owned())
+    } else {
+        Ok(amount)
+    }
 }
 
 fn valid_pin(pin: &str) -> bool {
@@ -970,6 +1035,29 @@ mod tests {
     #[test]
     fn parses_dollars_and_cents() {
         assert_eq!(parse_dollars_to_cents("$10.50").unwrap(), 1050);
+    }
+
+    #[test]
+    fn parses_flexible_money_inputs() {
+        assert_eq!(parse_dollars_to_cents("10.").unwrap(), 1000);
+        assert_eq!(parse_dollars_to_cents(".50").unwrap(), 50);
+        assert_eq!(parse_dollars_to_cents("$ 10").unwrap(), 1000);
+        assert_eq!(parse_dollars_to_cents("-10.50").unwrap(), -1050);
+        assert_eq!(parse_dollars_to_cents("-.50").unwrap(), -50);
+    }
+
+    #[test]
+    fn rejects_invalid_money_inputs() {
+        assert!(parse_dollars_to_cents("").is_err());
+        assert!(parse_dollars_to_cents("$").is_err());
+        assert!(parse_dollars_to_cents("10.999").is_err());
+        assert!(parse_dollars_to_cents("10.1.1").is_err());
+        assert!(parse_dollars_to_cents("ten").is_err());
+    }
+
+    #[test]
+    fn rejects_money_inputs_that_overflow_cents() {
+        assert!(parse_dollars_to_cents("92233720368547758.08").is_err());
     }
 
     #[test]
