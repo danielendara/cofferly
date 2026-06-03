@@ -29,6 +29,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "CHANGELOG.md") -Destination $packageDir
+    Copy-Item -LiteralPath (Join-Path $root "SECURITY.md") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageDir -Recurse
 
     @"
