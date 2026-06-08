@@ -4,6 +4,8 @@ AirWallet is a small Windows-friendly Rust desktop app for tracking money held f
 
 ![AirWallet parent PIN screen](docs/screenshots/airwallet-pin-screen.png)
 
+![AirWallet child wallet ledger](docs/screenshots/airwallet-wallet-screen.png)
+
 It starts with two neutral child wallets. Each wallet keeps a local ledger of deposits and deductions, similar to a handwritten allowance sheet:
 
 - Starting balance

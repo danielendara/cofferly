@@ -8,6 +8,7 @@ use std::path::PathBuf;
 const APP_NAME: &str = "AirWallet";
 const CHILDREN: [&str; 2] = ["Child 1", "Child 2"];
 const DEFAULT_PARENT_PIN: &str = "1234";
+const PIN_LENGTH: usize = 4;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -67,7 +68,8 @@ struct AirWalletApp {
     starting_balance_input: String,
     child_name_input: String,
     new_child_name_input: String,
-    pin_input: String,
+    pin_digits: [String; PIN_LENGTH],
+    pending_pin_focus: Option<usize>,
     new_pin_input: String,
     parent_unlocked: bool,
     status: String,
@@ -92,7 +94,8 @@ impl AirWalletApp {
             starting_balance_input: String::new(),
             child_name_input: String::new(),
             new_child_name_input: String::new(),
-            pin_input: String::new(),
+            pin_digits: Default::default(),
+            pending_pin_focus: Some(0),
             new_pin_input: String::new(),
             parent_unlocked: false,
             status: "Enter the parent PIN to unlock AirWallet.".to_owned(),
@@ -109,20 +112,69 @@ impl AirWalletApp {
     }
 
     fn unlock_parent(&mut self) {
-        if self.pin_input == self.data.parent_pin {
+        if self.entered_parent_pin() == self.data.parent_pin {
             self.parent_unlocked = true;
-            self.pin_input.clear();
+            self.clear_pin_digits();
             self.status = "Parent mode unlocked.".to_owned();
         } else {
-            self.pin_input.clear();
+            self.clear_pin_digits();
             self.status = "Wrong PIN. Try again.".to_owned();
         }
     }
 
     fn lock_parent(&mut self) {
         self.parent_unlocked = false;
-        self.pin_input.clear();
+        self.clear_pin_digits();
         self.status = "Locked. Enter the parent PIN to make changes.".to_owned();
+    }
+
+    fn entered_parent_pin(&self) -> String {
+        self.pin_digits.concat()
+    }
+
+    fn clear_pin_digits(&mut self) {
+        for digit in &mut self.pin_digits {
+            digit.clear();
+        }
+        self.pending_pin_focus = Some(0);
+    }
+
+    fn parent_pin_complete(&self) -> bool {
+        self.pin_digits.iter().all(|digit| digit.len() == 1)
+    }
+
+    fn normalize_pin_digit_input(&mut self, index: usize) {
+        let digits: Vec<char> = self.pin_digits[index]
+            .chars()
+            .filter(|character| character.is_ascii_digit())
+            .collect();
+
+        if digits.is_empty() {
+            self.pin_digits[index].clear();
+            self.pending_pin_focus = Some(index);
+            return;
+        }
+
+        if digits.len() == 1 {
+            self.pin_digits[index] = digits[0].to_string();
+            if index + 1 < PIN_LENGTH {
+                self.pending_pin_focus = Some(index + 1);
+            }
+            return;
+        }
+
+        let mut last_filled = index;
+        for (offset, digit) in digits.into_iter().enumerate() {
+            let target = index + offset;
+            if target >= PIN_LENGTH {
+                break;
+            }
+
+            self.pin_digits[target] = digit.to_string();
+            last_filled = target;
+        }
+
+        self.pending_pin_focus = Some((last_filled + 1).min(PIN_LENGTH - 1));
     }
 
     fn update_pin(&mut self) {
@@ -423,21 +475,59 @@ impl AirWalletApp {
                 ui.label(RichText::new("Parent PIN required").size(22.0));
                 ui.add_space(14.0);
                 ui.label("Balances and ledgers stay private until a parent unlocks the app.");
-                ui.add_space(20.0);
+                ui.add_space(24.0);
 
-                let response = ui.add_sized(
-                    [180.0, 36.0],
-                    egui::TextEdit::singleline(&mut self.pin_input)
-                        .password(true)
-                        .hint_text("4 digit PIN"),
-                );
+                ui.label(RichText::new("Enter 4 digit parent PIN").small().strong());
+                ui.add_space(8.0);
 
-                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                if let Some(index) = self.pending_pin_focus.take() {
+                    let id = ui.make_persistent_id(("parent_pin_digit", index));
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                }
+
+                let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    let pin_entry_width = PIN_LENGTH as f32 * 64.0 + (PIN_LENGTH - 1) as f32 * 12.0;
+                    ui.add_space(((ui.available_width() - pin_entry_width) / 2.0).max(0.0));
+
+                    for index in 0..PIN_LENGTH {
+                        let id = ui.make_persistent_id(("parent_pin_digit", index));
+                        let response = ui.add_sized(
+                            [64.0, 68.0],
+                            egui::TextEdit::singleline(&mut self.pin_digits[index])
+                                .id(id)
+                                .password(true)
+                                .font(egui::TextStyle::Heading)
+                                .horizontal_align(egui::Align::Center)
+                                .vertical_align(egui::Align::Center)
+                                .char_limit(PIN_LENGTH)
+                                .desired_width(64.0),
+                        );
+
+                        if response.changed() {
+                            self.normalize_pin_digit_input(index);
+                            ui.ctx().request_repaint();
+                        }
+
+                        if response.has_focus()
+                            && self.pin_digits[index].is_empty()
+                            && ui.input(|input| input.key_pressed(egui::Key::Backspace))
+                            && index > 0
+                        {
+                            self.pending_pin_focus = Some(index - 1);
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                });
+
+                if self.parent_pin_complete() && enter_pressed {
                     self.unlock_parent();
                 }
 
                 if ui
-                    .add_sized([180.0, 36.0], egui::Button::new("Unlock"))
+                    .add_sized([180.0, 38.0], egui::Button::new("Unlock"))
                     .clicked()
                 {
                     self.unlock_parent();
