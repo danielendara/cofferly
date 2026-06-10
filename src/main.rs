@@ -61,9 +61,25 @@ enum EntryKind {
     Deduction,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LedgerSort {
+    NewestFirst,
+    OldestFirst,
+}
+
+impl LedgerSort {
+    fn toggle(&mut self) {
+        *self = match self {
+            Self::NewestFirst => Self::OldestFirst,
+            Self::OldestFirst => Self::NewestFirst,
+        };
+    }
+}
+
 struct AirWalletApp {
     data: AppData,
     selected_wallet: usize,
+    ledger_sort: LedgerSort,
     draft: EntryDraft,
     starting_balance_input: String,
     child_name_input: String,
@@ -86,6 +102,7 @@ impl AirWalletApp {
         Self {
             data,
             selected_wallet: 0,
+            ledger_sort: LedgerSort::NewestFirst,
             draft: EntryDraft {
                 description: String::new(),
                 amount: String::new(),
@@ -673,8 +690,10 @@ impl AirWalletApp {
     }
 
     fn ledger_table(&mut self, ui: &mut egui::Ui) {
+        let ledger_sort = self.ledger_sort;
         let wallet = self.selected_wallet();
-        let rows = wallet.rows_with_balance();
+        let rows = wallet.rows_with_balance_sorted(ledger_sort);
+        let mut toggle_sort = false;
 
         egui_extras::TableBuilder::new(ui)
             .striped(true)
@@ -686,7 +705,21 @@ impl AirWalletApp {
             .column(egui_extras::Column::initial(140.0).at_least(100.0))
             .header(30.0, |mut header| {
                 header.col(|ui| {
-                    ui.strong("Date");
+                    let label = match ledger_sort {
+                        LedgerSort::NewestFirst => "Date v",
+                        LedgerSort::OldestFirst => "Date ^",
+                    };
+                    let tooltip = match ledger_sort {
+                        LedgerSort::NewestFirst => "Newest entries first. Click for oldest first.",
+                        LedgerSort::OldestFirst => "Oldest entries first. Click for newest first.",
+                    };
+                    if ui
+                        .small_button(RichText::new(label).strong())
+                        .on_hover_text(tooltip)
+                        .clicked()
+                    {
+                        toggle_sort = true;
+                    }
                 });
                 header.col(|ui| {
                     ui.strong("Description");
@@ -734,6 +767,10 @@ impl AirWalletApp {
                     });
                 }
             });
+
+        if toggle_sort {
+            self.ledger_sort.toggle();
+        }
     }
 }
 
@@ -756,6 +793,26 @@ impl Wallet {
                 (entry, balance)
             })
             .collect()
+    }
+
+    fn rows_with_balance_sorted(&self, sort: LedgerSort) -> Vec<(&Entry, i64)> {
+        let mut rows: Vec<_> = self.rows_with_balance().into_iter().enumerate().collect();
+
+        rows.sort_by(
+            |(left_index, (left_entry, _)), (right_index, (right_entry, _))| {
+                let chronological = left_entry
+                    .date
+                    .cmp(&right_entry.date)
+                    .then_with(|| left_index.cmp(right_index));
+
+                match sort {
+                    LedgerSort::NewestFirst => chronological.reverse(),
+                    LedgerSort::OldestFirst => chronological,
+                }
+            },
+        );
+
+        rows.into_iter().map(|(_, row)| row).collect()
     }
 }
 
@@ -1203,6 +1260,69 @@ mod tests {
     fn formats_money() {
         assert_eq!(format_money(19400), "$194.00");
         assert_eq!(format_money(-500), "-$5.00");
+    }
+
+    #[test]
+    fn sorts_ledger_rows_newest_first_with_historical_balances() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 1000,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "First".to_owned(),
+                    amount_cents: 500,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Second".to_owned(),
+                    amount_cents: -200,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Latest".to_owned(),
+                    amount_cents: 100,
+                },
+            ],
+        };
+
+        let rows = wallet.rows_with_balance_sorted(LedgerSort::NewestFirst);
+        let descriptions: Vec<_> = rows
+            .iter()
+            .map(|(entry, _)| entry.description.as_str())
+            .collect();
+        let balances: Vec<_> = rows.iter().map(|(_, balance)| *balance).collect();
+
+        assert_eq!(descriptions, ["Latest", "Second", "First"]);
+        assert_eq!(balances, [1400, 1300, 1500]);
+    }
+
+    #[test]
+    fn sorts_ledger_rows_oldest_first() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "First".to_owned(),
+                    amount_cents: 100,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Second".to_owned(),
+                    amount_cents: 100,
+                },
+            ],
+        };
+
+        let rows = wallet.rows_with_balance_sorted(LedgerSort::OldestFirst);
+        let descriptions: Vec<_> = rows
+            .iter()
+            .map(|(entry, _)| entry.description.as_str())
+            .collect();
+
+        assert_eq!(descriptions, ["First", "Second"]);
     }
 
     #[test]
