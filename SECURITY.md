@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-TallyNest is early-stage software. Security fixes target the latest released version.
+Atlas Wallet is early-stage software. Security fixes target the latest released version.
 
 ## Reporting a Vulnerability
 
@@ -12,6 +12,6 @@ Report security concerns privately through GitHub's private vulnerability report
 
 ## Security Scope
 
-TallyNest uses a simple 4 digit parent PIN as a family-use editing lock. It is not encryption and should not be treated as strong security.
+Atlas Wallet uses a simple 4 digit parent PIN as a family-use editing lock. It is not encryption and should not be treated as strong security.
 
 Private ledger data is stored locally on the user's machine.

@@ -1,13 +1,13 @@
 [package]
-name = "tallynest"
+name = "atlas-wallet"
 version = "0.1.0"
 edition = "2021"
-description = "A simple local allowance wallet for kids."
+description = "Atlas Wallet — a simple local allowance wallet for kids."
 license = "MIT"
-repository = "https://github.com/danielendara/tallynest"
+repository = "https://github.com/danielendara/atlas-wallet"
 
 [[bin]]
-name = "TallyNest"
+name = "AtlasWallet"
 path = "src/main.rs"
 
 [dependencies]

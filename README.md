@@ -1,10 +1,10 @@
-# TallyNest
+# Atlas Wallet
 
-TallyNest is a small Windows-friendly Rust desktop app for tracking money held for kids.
+Atlas Wallet is a small Windows-friendly Rust desktop app for tracking money held for kids.
 
-![TallyNest parent PIN screen](docs/screenshots/tallynest-pin-screen.png)
+![Atlas Wallet parent PIN screen](docs/screenshots/atlas-wallet-pin-screen.png)
 
-![TallyNest child wallet ledger](docs/screenshots/tallynest-wallet-screen.png)
+![Atlas Wallet child wallet ledger](docs/screenshots/atlas-wallet-wallet-screen.png)
 
 It starts with two neutral child wallets. Each wallet keeps a local ledger of deposits and deductions, similar to a handwritten allowance sheet:
 
@@ -23,7 +23,7 @@ It starts with two neutral child wallets. Each wallet keeps a local ledger of de
 For a local build, the Windows executable is:
 
 ```text
-target\release\TallyNest.exe
+target\release\AtlasWallet.exe
 ```
 
 For a portable release zip:
@@ -36,7 +36,7 @@ The zip will be created in `dist/`.
 
 ## Parent PIN
 
-TallyNest opens to a parent PIN screen so kids cannot add or remove entries without a parent unlocking the app first.
+Atlas Wallet opens to a parent PIN screen so kids cannot add or remove entries without a parent unlocking the app first.
 
 The first-run PIN is:
 
@@ -50,7 +50,7 @@ This is a simple family-use lock, not high-security encryption.
 
 ## Child Wallets
 
-TallyNest starts with `Child 1` and `Child 2` so the public app does not include anyone's real names.
+Atlas Wallet starts with `Child 1` and `Child 2` so the public app does not include anyone's real names.
 
 After unlocking parent mode, use **Child names** to rename the selected wallet or add another child wallet.
 
@@ -58,11 +58,11 @@ After unlocking parent mode, use **Child names** to rename the selected wallet o
 
 Use **Print this ledger** to print the selected child's ledger, or **Print both ledgers** to print both child wallets together.
 
-TallyNest creates a local printable HTML file and opens it in your browser with the print dialog ready.
+Atlas Wallet creates a local printable HTML file and opens it in your browser with the print dialog ready.
 
 ## Windows Installer
 
-The repository includes an Inno Setup script at `installer/TallyNest.iss`.
+The repository includes an Inno Setup script at `installer/AtlasWallet.iss`.
 
 Build the release executable first:
 
@@ -70,7 +70,7 @@ Build the release executable first:
 cargo build --release
 ```
 
-Then open `installer/TallyNest.iss` in Inno Setup and compile the installer. The installer output is written to `dist/`.
+Then open `installer/AtlasWallet.iss` in Inno Setup and compile the installer. The installer output is written to `dist/`.
 
 ## Development
 
@@ -87,7 +87,7 @@ cargo build --release
 ```
 
 The app stores data locally in your operating system's app data folder as JSON.
-Existing AirWallet data is imported automatically on the first TallyNest launch.
+Existing TallyNest and AirWallet data is imported automatically on the first launch.
 
 If `cargo` is not on PATH on Windows, add Rust's Cargo folder to PATH:
 

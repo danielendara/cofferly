@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const APP_NAME: &str = "TallyNest";
-const DATA_FILE_NAME: &str = "tallynest-data.json";
-const LEGACY_APP_NAME: &str = "AirWallet";
-const LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
+const APP_NAME: &str = "Atlas Wallet";
+const DATA_FILE_NAME: &str = "atlas-wallet-data.json";
+const LEGACY_APP_NAME: &str = "TallyNest";
+const LEGACY_DATA_FILE_NAME: &str = "tallynest-data.json";
+const AIRWALLET_LEGACY_APP_NAME: &str = "AirWallet";
+const AIRWALLET_LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
 const CHILDREN: [&str; 2] = ["Child 1", "Child 2"];
 const DEFAULT_PARENT_PIN: &str = "1234";
 const PIN_LENGTH: usize = 4;
@@ -19,7 +21,7 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1080.0, 720.0])
             .with_min_inner_size([820.0, 560.0])
             .with_title(APP_NAME)
-            .with_app_id("com.tallynest.app")
+            .with_app_id("com.atlaswallet.app")
             .with_icon(app_icon()),
         ..Default::default()
     };
@@ -27,7 +29,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(|cc| Ok(Box::new(TallyNestApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(AtlasWalletApp::new(cc)))),
     )
 }
 
@@ -79,7 +81,7 @@ impl LedgerSort {
     }
 }
 
-struct TallyNestApp {
+struct AtlasWalletApp {
     data: AppData,
     selected_wallet: usize,
     ledger_sort: LedgerSort,
@@ -95,7 +97,7 @@ struct TallyNestApp {
     data_path: PathBuf,
 }
 
-impl TallyNestApp {
+impl AtlasWalletApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_style(&cc.egui_ctx);
 
@@ -119,7 +121,7 @@ impl TallyNestApp {
             pending_pin_focus: Some(0),
             new_pin_input: String::new(),
             parent_unlocked: false,
-            status: "Enter the parent PIN to unlock TallyNest.".to_owned(),
+            status: "Enter the parent PIN to unlock Atlas Wallet.".to_owned(),
             data_path,
         }
     }
@@ -372,10 +374,10 @@ impl TallyNestApp {
 
     fn print_path(&self, all_wallets: bool) -> PathBuf {
         let file_name = if all_wallets {
-            "tallynest-ledgers.html".to_owned()
+            "atlas-wallet-ledgers.html".to_owned()
         } else {
             format!(
-                "tallynest-{}-ledger.html",
+                "atlas-wallet-{}-ledger.html",
                 ledger_file_stem(&self.selected_wallet().child_name)
             )
         };
@@ -395,7 +397,7 @@ impl TallyNestApp {
     }
 }
 
-impl eframe::App for TallyNestApp {
+impl eframe::App for AtlasWalletApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if !self.parent_unlocked {
             self.lock_screen(ui);
@@ -487,7 +489,7 @@ impl eframe::App for TallyNestApp {
     }
 }
 
-impl TallyNestApp {
+impl AtlasWalletApp {
     fn lock_screen(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -859,9 +861,24 @@ fn load_app_data_with_legacy(path: &PathBuf, legacy_path: &PathBuf) -> Option<Ap
         return load_app_data(path);
     }
 
-    let data = load_app_data(legacy_path)?;
-    let _ = save_app_data(path, &data);
-    Some(data)
+    if let Some(data) = load_app_data(legacy_path) {
+        let _ = save_app_data(path, &data);
+        return Some(data);
+    }
+
+    // Ultimate fallback for installs that still have the original AirWallet data
+    let airwallet_base = dirs::data_local_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let airwallet_path = airwallet_base
+        .join(AIRWALLET_LEGACY_APP_NAME)
+        .join(AIRWALLET_LEGACY_DATA_FILE_NAME);
+    if let Some(data) = load_app_data(&airwallet_path) {
+        let _ = save_app_data(path, &data);
+        return Some(data);
+    }
+
+    None
 }
 
 fn load_app_data(path: &PathBuf) -> Option<AppData> {
@@ -943,7 +960,7 @@ fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf,
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>TallyNest Ledger</title>
+<title>Atlas Wallet Ledger</title>
 <style>
 body {{ font-family: "Segoe UI", Arial, sans-serif; color: #1d2528; margin: 36px; }}
 section {{ break-after: page; margin-bottom: 40px; }}
@@ -1244,7 +1261,7 @@ mod tests {
         assert!(!valid_child_name(""));
         assert!(!valid_child_name("   "));
         assert!(!valid_child_name(
-            "This name is too long for the TallyNest sidebar"
+            "This name is too long for the Atlas Wallet sidebar"
         ));
     }
 
@@ -1273,9 +1290,11 @@ mod tests {
 
     #[test]
     fn imports_legacy_data_when_new_data_does_not_exist() {
-        let test_dir =
-            std::env::temp_dir().join(format!("tallynest-migration-test-{}", std::process::id()));
-        let new_path = test_dir.join("TallyNest").join(DATA_FILE_NAME);
+        let test_dir = std::env::temp_dir().join(format!(
+            "atlas-wallet-migration-test-{}",
+            std::process::id()
+        ));
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
         let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
         let data = default_app_data();
 
@@ -1292,10 +1311,10 @@ mod tests {
     #[test]
     fn does_not_replace_invalid_new_data_with_legacy_data() {
         let test_dir = std::env::temp_dir().join(format!(
-            "tallynest-invalid-data-test-{}",
+            "atlas-wallet-invalid-data-test-{}",
             std::process::id()
         ));
-        let new_path = test_dir.join("TallyNest").join(DATA_FILE_NAME);
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
         let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
 
         fs::create_dir_all(new_path.parent().unwrap()).unwrap();

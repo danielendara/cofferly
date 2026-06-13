@@ -1,6 +1,6 @@
 # Code of Conduct
 
-TallyNest should be a calm, useful, family-friendly project.
+Atlas Wallet should be a calm, useful, family-friendly project.
 
 ## Expected Behavior
 

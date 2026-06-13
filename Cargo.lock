@@ -365,6 +365,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "atlas-wallet"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "eframe",
+ "egui_extras",
+ "opener",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3156,19 +3169,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tallynest"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs",
- "eframe",
- "egui_extras",
- "opener",
- "serde",
- "serde_json",
 ]
 
 [[package]]

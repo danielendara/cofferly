@@ -1,6 +1,6 @@
 # GitHub Repository Settings
 
-These settings help keep TallyNest public while still maintainer-controlled.
+These settings help keep Atlas Wallet public while still maintainer-controlled.
 
 ## General
 

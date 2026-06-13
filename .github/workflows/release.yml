@@ -34,5 +34,5 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@v7
         with:
-          name: AirWallet-windows-x64
+          name: AtlasWallet-windows-x64
           path: dist/*.zip

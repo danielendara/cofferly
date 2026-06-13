@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $PackageVersion = $Version -replace '^v', ''
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $dist = Join-Path $root "dist"
-$packageName = "TallyNest-$PackageVersion-windows-x64"
+$packageName = "AtlasWallet-$PackageVersion-windows-x64"
 $packageDir = Join-Path $dist $packageName
 $zipPath = Join-Path $dist "$packageName.zip"
 $cargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
@@ -25,7 +25,7 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
-    Copy-Item -LiteralPath (Join-Path $root "target\release\TallyNest.exe") -Destination $packageDir
+    Copy-Item -LiteralPath (Join-Path $root "target\release\AtlasWallet.exe") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "CHANGELOG.md") -Destination $packageDir
@@ -33,9 +33,9 @@ try {
     Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageDir -Recurse
 
     @"
-TallyNest $PackageVersion
+AtlasWallet $PackageVersion
 
-Run TallyNest.exe to start.
+Run AtlasWallet.exe to start.
 First-run parent PIN: 1234
 
 Data is stored locally in the Windows app data folder.
