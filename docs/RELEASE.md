@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist when preparing an AirWallet release.
+Use this checklist when preparing a Atlas Wallet release.
 
 ## Local Checks
 
@@ -15,11 +15,11 @@ The portable zip will be created in `dist/`.
 
 ## Windows Installer
 
-The repository includes `installer/AirWallet.iss` for Inno Setup.
+The repository includes `installer/AtlasWallet.iss` for Inno Setup.
 
 1. Install Inno Setup.
-2. Build AirWallet with `cargo build --release`.
-3. Open `installer/AirWallet.iss`.
+2. Build Atlas Wallet with `cargo build --release`.
+3. Open `installer/Atlas Wallet.iss`.
 4. Compile the installer.
 
 The installer output is written to `dist/`.
@@ -38,9 +38,9 @@ Before announcing a release, review [GITHUB_SETTINGS.md](GITHUB_SETTINGS.md).
 
 ## Manual Smoke Test
 
-Before publishing, open AirWallet and verify:
+Before publishing, open Atlas Wallet and verify:
 
-- The app launches as `AirWallet`.
+- The app launches as `Atlas Wallet`.
 - The parent PIN screen appears first.
 - PIN `1234` unlocks a fresh install.
 - Both default child wallets are visible.

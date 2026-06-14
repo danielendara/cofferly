@@ -1,6 +1,6 @@
 # Contributing
 
-AirWallet is a maintainer-led family app. The repository is public so people can learn from it, audit it, fork it, and propose useful improvements, but it is not open for direct unreviewed changes.
+Atlas Wallet is a maintainer-led family app. The repository is public so people can learn from it, audit it, fork it, and propose useful improvements, but it is not open for direct unreviewed changes.
 
 ## Contribution Policy
 
@@ -31,4 +31,4 @@ If `cargo` is not on PATH on Windows, add `%USERPROFILE%\.cargo\bin` to PATH or 
 
 ## Maintainer Control
 
-Only maintainers decide whether a contribution fits AirWallet. A public repository does not mean every proposed change will be accepted.
+Only maintainers decide whether a contribution fits Atlas Wallet. A public repository does not mean every proposed change will be accepted.

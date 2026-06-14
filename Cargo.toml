@@ -1,13 +1,13 @@
 [package]
-name = "airwallet"
+name = "atlas-wallet"
 version = "0.1.0"
 edition = "2021"
-description = "A simple local allowance wallet for kids."
+description = "Atlas Wallet — a simple local allowance wallet for kids."
 license = "MIT"
-repository = "https://github.com/danielendara/airwallet"
+repository = "https://github.com/danielendara/atlas-wallet"
 
 [[bin]]
-name = "AirWallet"
+name = "AtlasWallet"
 path = "src/main.rs"
 
 [dependencies]

@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const APP_NAME: &str = "AirWallet";
+const APP_NAME: &str = "Atlas Wallet";
+const DATA_FILE_NAME: &str = "atlas-wallet-data.json";
+const LEGACY_APP_NAME: &str = "TallyNest";
+const LEGACY_DATA_FILE_NAME: &str = "tallynest-data.json";
+const AIRWALLET_LEGACY_APP_NAME: &str = "AirWallet";
+const AIRWALLET_LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
 const CHILDREN: [&str; 2] = ["Child 1", "Child 2"];
 const DEFAULT_PARENT_PIN: &str = "1234";
 const PIN_LENGTH: usize = 4;
@@ -16,7 +21,7 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1080.0, 720.0])
             .with_min_inner_size([820.0, 560.0])
             .with_title(APP_NAME)
-            .with_app_id("com.airwallet.app")
+            .with_app_id("com.atlaswallet.app")
             .with_icon(app_icon()),
         ..Default::default()
     };
@@ -24,7 +29,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(|cc| Ok(Box::new(AirWalletApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(AtlasWalletApp::new(cc)))),
     )
 }
 
@@ -76,7 +81,7 @@ impl LedgerSort {
     }
 }
 
-struct AirWalletApp {
+struct AtlasWalletApp {
     data: AppData,
     selected_wallet: usize,
     ledger_sort: LedgerSort,
@@ -92,12 +97,13 @@ struct AirWalletApp {
     data_path: PathBuf,
 }
 
-impl AirWalletApp {
+impl AtlasWalletApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_style(&cc.egui_ctx);
 
         let data_path = data_path();
-        let data = load_app_data(&data_path).unwrap_or_else(default_app_data);
+        let data = load_app_data_with_legacy(&data_path, &legacy_data_path())
+            .unwrap_or_else(default_app_data);
 
         Self {
             data,
@@ -115,7 +121,7 @@ impl AirWalletApp {
             pending_pin_focus: Some(0),
             new_pin_input: String::new(),
             parent_unlocked: false,
-            status: "Enter the parent PIN to unlock AirWallet.".to_owned(),
+            status: "Enter the parent PIN to unlock Atlas Wallet.".to_owned(),
             data_path,
         }
     }
@@ -368,10 +374,10 @@ impl AirWalletApp {
 
     fn print_path(&self, all_wallets: bool) -> PathBuf {
         let file_name = if all_wallets {
-            "airwallet-ledgers.html".to_owned()
+            "atlas-wallet-ledgers.html".to_owned()
         } else {
             format!(
-                "airwallet-{}-ledger.html",
+                "atlas-wallet-{}-ledger.html",
                 ledger_file_stem(&self.selected_wallet().child_name)
             )
         };
@@ -391,7 +397,7 @@ impl AirWalletApp {
     }
 }
 
-impl eframe::App for AirWalletApp {
+impl eframe::App for AtlasWalletApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if !self.parent_unlocked {
             self.lock_screen(ui);
@@ -483,7 +489,7 @@ impl eframe::App for AirWalletApp {
     }
 }
 
-impl AirWalletApp {
+impl AtlasWalletApp {
     fn lock_screen(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -839,7 +845,40 @@ fn data_path() -> PathBuf {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    base.join(APP_NAME).join("airwallet-data.json")
+    base.join(APP_NAME).join(DATA_FILE_NAME)
+}
+
+fn legacy_data_path() -> PathBuf {
+    let base = dirs::data_local_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    base.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME)
+}
+
+fn load_app_data_with_legacy(path: &PathBuf, legacy_path: &PathBuf) -> Option<AppData> {
+    if path.exists() {
+        return load_app_data(path);
+    }
+
+    if let Some(data) = load_app_data(legacy_path) {
+        let _ = save_app_data(path, &data);
+        return Some(data);
+    }
+
+    // Ultimate fallback for installs that still have the original AirWallet data
+    let airwallet_base = dirs::data_local_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let airwallet_path = airwallet_base
+        .join(AIRWALLET_LEGACY_APP_NAME)
+        .join(AIRWALLET_LEGACY_DATA_FILE_NAME);
+    if let Some(data) = load_app_data(&airwallet_path) {
+        let _ = save_app_data(path, &data);
+        return Some(data);
+    }
+
+    None
 }
 
 fn load_app_data(path: &PathBuf) -> Option<AppData> {
@@ -921,7 +960,7 @@ fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf,
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AirWallet Ledger</title>
+<title>Atlas Wallet Ledger</title>
 <style>
 body {{ font-family: "Segoe UI", Arial, sans-serif; color: #1d2528; margin: 36px; }}
 section {{ break-after: page; margin-bottom: 40px; }}
@@ -1222,7 +1261,7 @@ mod tests {
         assert!(!valid_child_name(""));
         assert!(!valid_child_name("   "));
         assert!(!valid_child_name(
-            "This name is too long for the AirWallet sidebar"
+            "This name is too long for the Atlas Wallet sidebar"
         ));
     }
 
@@ -1247,6 +1286,45 @@ mod tests {
             normalize_app_data(data).unwrap().parent_pin,
             DEFAULT_PARENT_PIN
         );
+    }
+
+    #[test]
+    fn imports_legacy_data_when_new_data_does_not_exist() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "atlas-wallet-migration-test-{}",
+            std::process::id()
+        ));
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
+        let data = default_app_data();
+
+        save_app_data(&legacy_path, &data).unwrap();
+
+        let loaded = load_app_data_with_legacy(&new_path, &legacy_path).unwrap();
+
+        assert_eq!(loaded.wallets.len(), data.wallets.len());
+        assert!(new_path.exists());
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
+    fn does_not_replace_invalid_new_data_with_legacy_data() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "atlas-wallet-invalid-data-test-{}",
+            std::process::id()
+        ));
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
+
+        fs::create_dir_all(new_path.parent().unwrap()).unwrap();
+        fs::write(&new_path, "invalid data").unwrap();
+        save_app_data(&legacy_path, &default_app_data()).unwrap();
+
+        assert!(load_app_data_with_legacy(&new_path, &legacy_path).is_none());
+        assert_eq!(fs::read_to_string(&new_path).unwrap(), "invalid data");
+
+        fs::remove_dir_all(test_dir).unwrap();
     }
 
     #[test]

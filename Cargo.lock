@@ -141,19 +141,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "airwallet"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs",
- "eframe",
- "egui_extras",
- "opener",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -375,6 +362,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "atlas-wallet"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "eframe",
+ "egui_extras",
+ "opener",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
