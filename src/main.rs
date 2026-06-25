@@ -6,7 +6,8 @@ use std::fs;
 use std::path::PathBuf;
 
 const APP_NAME: &str = "Atlas Wallet";
-const DATA_FILE_NAME: &str = "atlas-wallet-data.json";
+const DATA_FILE_NAME: &str = "data.json";
+const ATLAS_LEGACY_DATA_FILE_NAME: &str = "atlas-wallet-data.json";
 const LEGACY_APP_NAME: &str = "TallyNest";
 const LEGACY_DATA_FILE_NAME: &str = "tallynest-data.json";
 const AIRWALLET_LEGACY_APP_NAME: &str = "AirWallet";
@@ -102,8 +103,9 @@ impl AtlasWalletApp {
         configure_style(&cc.egui_ctx);
 
         let data_path = data_path();
-        let data = load_app_data_with_legacy(&data_path, &legacy_data_path())
-            .unwrap_or_else(default_app_data);
+        let data =
+            load_app_data_with_legacy(&data_path, &atlas_legacy_data_path(), &legacy_data_path())
+                .unwrap_or_else(default_app_data);
 
         Self {
             data,
@@ -848,6 +850,14 @@ fn data_path() -> PathBuf {
     base.join(APP_NAME).join(DATA_FILE_NAME)
 }
 
+fn atlas_legacy_data_path() -> PathBuf {
+    let base = dirs::data_local_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    base.join(APP_NAME).join(ATLAS_LEGACY_DATA_FILE_NAME)
+}
+
 fn legacy_data_path() -> PathBuf {
     let base = dirs::data_local_dir()
         .or_else(|| std::env::current_dir().ok())
@@ -856,9 +866,18 @@ fn legacy_data_path() -> PathBuf {
     base.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME)
 }
 
-fn load_app_data_with_legacy(path: &PathBuf, legacy_path: &PathBuf) -> Option<AppData> {
+fn load_app_data_with_legacy(
+    path: &PathBuf,
+    atlas_legacy_path: &PathBuf,
+    legacy_path: &PathBuf,
+) -> Option<AppData> {
     if path.exists() {
         return load_app_data(path);
+    }
+
+    if let Some(data) = load_app_data(atlas_legacy_path) {
+        let _ = save_app_data(path, &data);
+        return Some(data);
     }
 
     if let Some(data) = load_app_data(legacy_path) {
@@ -1295,17 +1314,46 @@ mod tests {
             std::process::id()
         ));
         let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let atlas_legacy_path = test_dir.join(APP_NAME).join(ATLAS_LEGACY_DATA_FILE_NAME);
         let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
         let data = default_app_data();
 
         save_app_data(&legacy_path, &data).unwrap();
 
-        let loaded = load_app_data_with_legacy(&new_path, &legacy_path).unwrap();
+        let loaded =
+            load_app_data_with_legacy(&new_path, &atlas_legacy_path, &legacy_path).unwrap();
 
         assert_eq!(loaded.wallets.len(), data.wallets.len());
         assert!(new_path.exists());
 
         fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
+    fn imports_atlas_named_data_when_generic_data_does_not_exist() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "atlas-wallet-generic-data-migration-test-{}",
+            std::process::id()
+        ));
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let atlas_legacy_path = test_dir.join(APP_NAME).join(ATLAS_LEGACY_DATA_FILE_NAME);
+        let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
+        let data = default_app_data();
+
+        save_app_data(&atlas_legacy_path, &data).unwrap();
+
+        let loaded =
+            load_app_data_with_legacy(&new_path, &atlas_legacy_path, &legacy_path).unwrap();
+
+        assert_eq!(loaded.wallets.len(), data.wallets.len());
+        assert!(new_path.exists());
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
+    fn stores_current_data_in_generic_file_name() {
+        assert_eq!(DATA_FILE_NAME, "data.json");
     }
 
     #[test]
@@ -1315,13 +1363,15 @@ mod tests {
             std::process::id()
         ));
         let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let atlas_legacy_path = test_dir.join(APP_NAME).join(ATLAS_LEGACY_DATA_FILE_NAME);
         let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
 
         fs::create_dir_all(new_path.parent().unwrap()).unwrap();
         fs::write(&new_path, "invalid data").unwrap();
+        save_app_data(&atlas_legacy_path, &default_app_data()).unwrap();
         save_app_data(&legacy_path, &default_app_data()).unwrap();
 
-        assert!(load_app_data_with_legacy(&new_path, &legacy_path).is_none());
+        assert!(load_app_data_with_legacy(&new_path, &atlas_legacy_path, &legacy_path).is_none());
         assert_eq!(fs::read_to_string(&new_path).unwrap(), "invalid data");
 
         fs::remove_dir_all(test_dir).unwrap();
