@@ -1,0 +1,116 @@
+pub fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
+    let trimmed = input.trim();
+    let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed).trim();
+    if trimmed.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    let (negative, amount) = match trimmed.strip_prefix('-') {
+        Some(amount) => (true, amount),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+
+    if amount.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    let (dollars, cents) = match amount.split_once('.') {
+        Some((dollars, cents)) => {
+            if cents.contains('.') {
+                return Err("Use only one decimal point.".to_owned());
+            }
+            (dollars, cents)
+        }
+        None => (amount, "0"),
+    };
+
+    if dollars.is_empty() && cents.is_empty() {
+        return Err("Enter a dollar amount.".to_owned());
+    }
+
+    if !dollars.chars().all(|character| character.is_ascii_digit())
+        || !cents.chars().all(|character| character.is_ascii_digit())
+    {
+        return Err("Use digits and at most one decimal point.".to_owned());
+    }
+
+    let dollars = if dollars.is_empty() {
+        0
+    } else {
+        dollars.parse::<i64>().map_err(|err| err.to_string())?
+    };
+    let cents = match cents.len() {
+        0 => 0,
+        1 => cents.parse::<i64>().map_err(|err| err.to_string())? * 10,
+        2 => cents.parse::<i64>().map_err(|err| err.to_string())?,
+        _ => return Err("Use at most two decimal places.".to_owned()),
+    };
+
+    let amount = dollars
+        .checked_mul(100)
+        .and_then(|dollars| dollars.checked_add(cents))
+        .ok_or_else(|| "Amount is too large.".to_owned())?;
+
+    if negative {
+        amount
+            .checked_neg()
+            .ok_or_else(|| "Amount is too large.".to_owned())
+    } else {
+        Ok(amount)
+    }
+}
+
+pub fn format_money(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let absolute = cents.abs();
+    format!("{sign}${}.{:02}", absolute / 100, absolute % 100)
+}
+
+pub fn format_money_input(cents: i64) -> String {
+    let absolute = cents.abs();
+    format!("{}.{:02}", absolute / 100, absolute % 100)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_whole_dollars() {
+        assert_eq!(parse_dollars_to_cents("10").unwrap(), 1000);
+    }
+
+    #[test]
+    fn parses_dollars_and_cents() {
+        assert_eq!(parse_dollars_to_cents("$10.50").unwrap(), 1050);
+    }
+
+    #[test]
+    fn parses_flexible_money_inputs() {
+        assert_eq!(parse_dollars_to_cents("10.").unwrap(), 1000);
+        assert_eq!(parse_dollars_to_cents(".50").unwrap(), 50);
+        assert_eq!(parse_dollars_to_cents("$ 10").unwrap(), 1000);
+        assert_eq!(parse_dollars_to_cents("-10.50").unwrap(), -1050);
+        assert_eq!(parse_dollars_to_cents("-.50").unwrap(), -50);
+    }
+
+    #[test]
+    fn rejects_invalid_money_inputs() {
+        assert!(parse_dollars_to_cents("").is_err());
+        assert!(parse_dollars_to_cents("$").is_err());
+        assert!(parse_dollars_to_cents("10.999").is_err());
+        assert!(parse_dollars_to_cents("10.1.1").is_err());
+        assert!(parse_dollars_to_cents("ten").is_err());
+    }
+
+    #[test]
+    fn rejects_money_inputs_that_overflow_cents() {
+        assert!(parse_dollars_to_cents("92233720368547758.08").is_err());
+    }
+
+    #[test]
+    fn formats_money() {
+        assert_eq!(format_money(19400), "$194.00");
+        assert_eq!(format_money(-500), "-$5.00");
+    }
+}
