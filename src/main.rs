@@ -19,6 +19,7 @@ pub const LEGACY_DATA_FILE_NAME: &str = "tallynest-data.json";
 pub const AIRWALLET_LEGACY_APP_NAME: &str = "AirWallet";
 pub const AIRWALLET_LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
 const PIN_LENGTH: usize = 4;
+const LOCK_SCREEN_IMAGE_BYTES: &[u8] = include_bytes!("../assets/cofferly-lock.jpg");
 
 use data::{
     default_app_data, valid_cents, valid_child_name, valid_pin, AppData, Entry, EntryKind,
@@ -70,6 +71,7 @@ struct CofferlyApp {
     save_enabled: bool,
     status: String,
     data_path: PathBuf,
+    lock_screen_image: Option<egui::TextureHandle>,
 }
 
 impl CofferlyApp {
@@ -137,6 +139,7 @@ impl CofferlyApp {
             save_enabled,
             status,
             data_path,
+            lock_screen_image: load_lock_screen_image(&cc.egui_ctx),
         }
     }
 
@@ -624,7 +627,12 @@ impl CofferlyApp {
     fn lock_screen(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
+                ui.add_space(36.0);
+                if let Some(texture) = &self.lock_screen_image {
+                    let image_size = egui::vec2(260.0, 146.0);
+                    ui.add(egui::Image::new(texture).fit_to_exact_size(image_size));
+                    ui.add_space(10.0);
+                }
                 ui.label(RichText::new(APP_NAME).size(42.0).strong());
                 ui.label(RichText::new("Parent PIN required").size(22.0));
                 ui.add_space(14.0);
@@ -898,4 +906,17 @@ impl CofferlyApp {
 
 fn pin_digit_id(index: usize) -> egui::Id {
     egui::Id::new(("parent_pin_digit", index))
+}
+
+fn load_lock_screen_image(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory(LOCK_SCREEN_IMAGE_BYTES).ok()?;
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+
+    Some(ctx.load_texture(
+        "cofferly-lock-image",
+        color_image,
+        egui::TextureOptions::LINEAR,
+    ))
 }

@@ -729,6 +729,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui_extras",
+ "image",
  "opener",
  "rand",
  "serde",
@@ -1767,6 +1768,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
