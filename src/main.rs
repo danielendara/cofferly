@@ -154,20 +154,17 @@ impl CofferlyApp {
         // Try encrypted path first
         if let Some(raw) = &self.raw_bytes {
             if crypto::is_encrypted(raw) {
-                match crypto::decrypt(raw, &entered) {
-                    Ok(plain) => {
-                        if let Ok(loaded) = serde_json::from_slice::<AppData>(&plain) {
-                            if let Some(normalized) = data::normalize_app_data(loaded) {
-                                // Successful decrypt with this PIN proves it was correct.
-                                self.data = normalized;
-                                self.parent_unlocked = true;
-                                self.clear_pin_digits();
-                                self.status = "Parent mode unlocked.".to_string();
-                                return;
-                            }
+                if let Ok(plain) = crypto::decrypt(raw, &entered) {
+                    if let Ok(loaded) = serde_json::from_slice::<AppData>(&plain) {
+                        if let Some(normalized) = data::normalize_app_data(loaded) {
+                            // Successful decrypt with this PIN proves it was correct.
+                            self.data = normalized;
+                            self.parent_unlocked = true;
+                            self.clear_pin_digits();
+                            self.status = "Parent mode unlocked.".to_string();
+                            return;
                         }
                     }
-                    Err(_) => {}
                 }
                 self.clear_pin_digits();
                 self.status = "Wrong PIN or data has been tampered with.".to_string();
