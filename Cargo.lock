@@ -649,6 +649,7 @@ dependencies = [
  "opener",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

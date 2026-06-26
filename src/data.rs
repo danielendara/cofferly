@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
 pub const MAX_CHILD_NAME_CHARS: usize = 40;
+pub const MAX_ABSOLUTE_CENTS: i64 = 99_999_999_999;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppData {
@@ -48,12 +49,11 @@ impl LedgerSort {
 
 impl Wallet {
     pub fn current_balance_cents(&self) -> i64 {
-        self.starting_balance_cents
-            + self
-                .entries
-                .iter()
-                .map(|entry| entry.amount_cents)
-                .sum::<i64>()
+        self.entries
+            .iter()
+            .fold(self.starting_balance_cents, |balance, entry| {
+                clamp_cents(balance.saturating_add(entry.amount_cents))
+            })
     }
 
     pub fn rows_with_balance(&self) -> Vec<(&Entry, i64)> {
@@ -61,10 +61,37 @@ impl Wallet {
         self.entries
             .iter()
             .map(|entry| {
-                balance += entry.amount_cents;
+                balance = clamp_cents(balance.saturating_add(entry.amount_cents));
                 (entry, balance)
             })
             .collect()
+    }
+
+    pub fn balances_are_valid(&self) -> bool {
+        self.checked_running_balances().is_some()
+    }
+
+    fn checked_running_balances(&self) -> Option<Vec<i64>> {
+        if !valid_cents(self.starting_balance_cents)
+            || self
+                .entries
+                .iter()
+                .any(|entry| !valid_cents(entry.amount_cents))
+        {
+            return None;
+        }
+
+        let mut balance = self.starting_balance_cents;
+        let mut balances = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            balance = balance.checked_add(entry.amount_cents)?;
+            if !valid_cents(balance) {
+                return None;
+            }
+            balances.push(balance);
+        }
+
+        Some(balances)
     }
 
     pub fn rows_with_balance_sorted(&self, sort: LedgerSort) -> Vec<(&Entry, i64)> {
@@ -111,8 +138,16 @@ pub fn normalize_app_data(mut data: AppData) -> Option<AppData> {
         return None;
     }
 
+    if data
+        .wallets
+        .iter()
+        .any(|wallet| !wallet.balances_are_valid())
+    {
+        return None;
+    }
+
     if !valid_pin(&data.parent_pin) {
-        data.parent_pin = DEFAULT_PARENT_PIN.to_owned();
+        data.parent_pin = DEFAULT_PARENT_PIN.to_string();
     }
 
     Some(data)
@@ -124,6 +159,14 @@ pub fn valid_pin(pin: &str) -> bool {
 
 pub fn valid_child_name(name: &str) -> bool {
     !name.trim().is_empty() && name.chars().count() <= MAX_CHILD_NAME_CHARS
+}
+
+pub fn valid_cents(cents: i64) -> bool {
+    cents.unsigned_abs() <= MAX_ABSOLUTE_CENTS as u64
+}
+
+fn clamp_cents(cents: i64) -> i64 {
+    cents.clamp(-MAX_ABSOLUTE_CENTS, MAX_ABSOLUTE_CENTS)
 }
 
 #[cfg(test)]
@@ -168,6 +211,38 @@ mod tests {
             normalize_app_data(data).unwrap().parent_pin,
             DEFAULT_PARENT_PIN
         );
+    }
+
+    #[test]
+    fn rejects_loaded_wallets_with_out_of_range_amounts() {
+        let data = AppData {
+            parent_pin: "1234".to_owned(),
+            wallets: vec![Wallet {
+                child_name: "Child 1".to_owned(),
+                starting_balance_cents: MAX_ABSOLUTE_CENTS + 1,
+                entries: Vec::new(),
+            }],
+        };
+
+        assert!(normalize_app_data(data).is_none());
+    }
+
+    #[test]
+    fn rejects_loaded_wallets_with_overflowing_running_balances() {
+        let data = AppData {
+            parent_pin: "1234".to_owned(),
+            wallets: vec![Wallet {
+                child_name: "Child 1".to_owned(),
+                starting_balance_cents: MAX_ABSOLUTE_CENTS,
+                entries: vec![Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                    description: "Too much".to_owned(),
+                    amount_cents: 1,
+                }],
+            }],
+        };
+
+        assert!(normalize_app_data(data).is_none());
     }
 
     #[test]
