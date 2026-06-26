@@ -20,7 +20,8 @@ pub const AIRWALLET_LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
 const PIN_LENGTH: usize = 4;
 
 use data::{
-    default_app_data, valid_child_name, valid_pin, AppData, Entry, EntryKind, LedgerSort, Wallet,
+    default_app_data, valid_cents, valid_child_name, valid_pin, AppData, Entry, EntryKind,
+    LedgerSort, Wallet,
 };
 use io::{data_path, load_app_data_with_legacy, save_app_data};
 use money::{format_money, format_money_input, parse_dollars_to_cents};
@@ -64,6 +65,7 @@ struct CofferlyApp {
     pending_pin_focus: Option<usize>,
     new_pin_input: String,
     parent_unlocked: bool,
+    save_enabled: bool,
     status: String,
     data_path: PathBuf,
 }
@@ -73,7 +75,23 @@ impl CofferlyApp {
         configure_style(&cc.egui_ctx);
 
         let data_path = data_path();
-        let data = load_app_data_with_legacy(&data_path).unwrap_or_else(default_app_data);
+        let (data, save_enabled, status) = match load_app_data_with_legacy(&data_path) {
+            Ok(Some(data)) => (
+                data,
+                true,
+                "Enter the parent PIN to unlock Cofferly.".to_string(),
+            ),
+            Ok(None) => (
+                default_app_data(),
+                true,
+                "Enter the parent PIN to unlock Cofferly.".to_string(),
+            ),
+            Err(err) => (
+                default_app_data(),
+                false,
+                format!("Could not load saved data: {err}. Changes are disabled."),
+            ),
+        };
 
         Self {
             data,
@@ -91,7 +109,8 @@ impl CofferlyApp {
             pending_pin_focus: Some(0),
             new_pin_input: String::new(),
             parent_unlocked: false,
-            status: "Enter the parent PIN to unlock Cofferly.".to_owned(),
+            save_enabled,
+            status,
             data_path,
         }
     }
@@ -108,17 +127,17 @@ impl CofferlyApp {
         if self.entered_parent_pin() == self.data.parent_pin {
             self.parent_unlocked = true;
             self.clear_pin_digits();
-            self.status = "Parent mode unlocked.".to_owned();
+            self.status = "Parent mode unlocked.".to_string();
         } else {
             self.clear_pin_digits();
-            self.status = "Wrong PIN. Try again.".to_owned();
+            self.status = "Wrong PIN. Try again.".to_string();
         }
     }
 
     fn lock_parent(&mut self) {
         self.parent_unlocked = false;
         self.clear_pin_digits();
-        self.status = "Locked. Enter the parent PIN to make changes.".to_owned();
+        self.status = "Locked. Enter the parent PIN to make changes.".to_string();
     }
 
     fn entered_parent_pin(&self) -> String {
@@ -139,7 +158,7 @@ impl CofferlyApp {
     fn normalize_pin_digit_input(&mut self, index: usize) {
         let digits: Vec<char> = self.pin_digits[index]
             .chars()
-            .filter(|character| character.is_ascii_digit())
+            .filter(char::is_ascii_digit)
             .collect();
 
         if digits.is_empty() {
@@ -171,33 +190,39 @@ impl CofferlyApp {
     }
 
     fn update_pin(&mut self) {
-        if !valid_pin(&self.new_pin_input) {
-            self.status = "Choose exactly 4 digits for the parent PIN.".to_owned();
+        if !self.can_change("Unlock parent mode before changing the PIN.") {
             return;
         }
 
-        self.data.parent_pin = self.new_pin_input.clone();
-        self.new_pin_input.clear();
+        if !valid_pin(&self.new_pin_input) {
+            self.status = "Choose exactly 4 digits for the parent PIN.".to_string();
+            return;
+        }
+
+        self.data.parent_pin = std::mem::take(&mut self.new_pin_input);
         self.save_with_success("Parent PIN updated.");
     }
 
     fn add_entry(&mut self) {
-        if !self.parent_unlocked {
-            self.status = "Unlock parent mode before adding entries.".to_owned();
+        if !self.can_change("Unlock parent mode before adding entries.") {
             return;
         }
 
         let amount = match parse_dollars_to_cents(&self.draft.amount) {
             Ok(amount) if amount > 0 => amount,
             _ => {
-                self.status = "Enter a valid amount, like 10 or 10.50.".to_owned();
+                self.status = "Enter a valid amount, like 10 or 10.50.".to_string();
                 return;
             }
         };
+        if !valid_cents(amount) {
+            self.status = "Enter a smaller amount.".to_string();
+            return;
+        }
 
         let description = self.draft.description.trim().to_owned();
         if description.is_empty() {
-            self.status = "Add a short description first.".to_owned();
+            self.status = "Add a short description first.".to_string();
             return;
         }
 
@@ -209,6 +234,18 @@ impl CofferlyApp {
             EntryKind::Deposit => amount,
             EntryKind::Deduction => -amount,
         };
+        let mut updated_wallet = self.selected_wallet().clone();
+        updated_wallet.entries.push(Entry {
+            date: Local::now().date_naive(),
+            description: description.clone(),
+            amount_cents: signed_amount,
+        });
+        if !updated_wallet.balances_are_valid() {
+            self.status =
+                "That entry would put the wallet outside Cofferly's supported range.".to_string();
+            return;
+        }
+
         let wallet_name = self.selected_wallet().child_name.clone();
         let status = format!(
             "{action} {} for {}: {description}.",
@@ -228,24 +265,32 @@ impl CofferlyApp {
     }
 
     fn quick_entry(&mut self, description: &str, amount_cents: i64, kind: EntryKind) {
-        self.draft.description = description.to_owned();
+        self.draft.description = description.to_string();
         self.draft.amount = format_money_input(amount_cents);
         self.draft.kind = kind;
     }
 
     fn update_starting_balance(&mut self) {
-        if !self.parent_unlocked {
-            self.status = "Unlock parent mode before changing balances.".to_owned();
+        if !self.can_change("Unlock parent mode before changing balances.") {
             return;
         }
 
-        let balance = match parse_dollars_to_cents(&self.starting_balance_input) {
-            Ok(balance) => balance,
-            Err(_) => {
-                self.status = "Enter a valid starting balance, like 90 or 90.00.".to_owned();
-                return;
-            }
+        let Ok(balance) = parse_dollars_to_cents(&self.starting_balance_input) else {
+            self.status = "Enter a valid starting balance, like 90 or 90.00.".to_string();
+            return;
         };
+        if !valid_cents(balance) {
+            self.status = "Enter a smaller starting balance.".to_string();
+            return;
+        }
+        let mut updated_wallet = self.selected_wallet().clone();
+        updated_wallet.starting_balance_cents = balance;
+        if !updated_wallet.balances_are_valid() {
+            self.status =
+                "That starting balance would put the wallet outside Cofferly's supported range."
+                    .to_string();
+            return;
+        }
 
         let wallet_name = self.selected_wallet().child_name.clone();
         self.selected_wallet_mut().starting_balance_cents = balance;
@@ -258,32 +303,33 @@ impl CofferlyApp {
     }
 
     fn rename_selected_child(&mut self) {
-        if !self.parent_unlocked {
-            self.status = "Unlock parent mode before renaming wallets.".to_owned();
+        if !self.can_change("Unlock parent mode before renaming wallets.") {
             return;
         }
 
         let name = self.child_name_input.trim().to_owned();
         if !valid_child_name(&name) {
-            self.status = "Use a child name between 1 and 40 characters.".to_owned();
+            self.status = "Use a child name between 1 and 40 characters.".to_string();
             return;
         }
 
-        let old_name = self.selected_wallet().child_name.clone();
-        self.selected_wallet_mut().child_name = name.clone();
+        let old_name = std::mem::take(&mut self.selected_wallet_mut().child_name);
+        self.selected_wallet_mut().child_name = name;
         self.child_name_input.clear();
-        self.save_with_success(format!("Renamed {old_name} to {name}."));
+        self.save_with_success(format!(
+            "Renamed {old_name} to {}.",
+            self.selected_wallet().child_name
+        ));
     }
 
     fn add_child_wallet(&mut self) {
-        if !self.parent_unlocked {
-            self.status = "Unlock parent mode before adding wallets.".to_owned();
+        if !self.can_change("Unlock parent mode before adding wallets.") {
             return;
         }
 
         let name = self.new_child_name_input.trim().to_owned();
         if !valid_child_name(&name) {
-            self.status = "Use a child name between 1 and 40 characters.".to_owned();
+            self.status = "Use a child name between 1 and 40 characters.".to_string();
             return;
         }
 
@@ -298,8 +344,7 @@ impl CofferlyApp {
     }
 
     fn remove_latest_entry(&mut self) {
-        if !self.parent_unlocked {
-            self.status = "Unlock parent mode before removing entries.".to_owned();
+        if !self.can_change("Unlock parent mode before removing entries.") {
             return;
         }
 
@@ -312,26 +357,36 @@ impl CofferlyApp {
                 entry.description
             ));
         } else {
-            self.status = "There are no entries to remove.".to_owned();
+            self.status = "There are no entries to remove.".to_string();
         }
     }
 
     fn print_selected_wallet(&mut self) {
+        if !self.save_enabled {
+            self.status = "Saved data could not be loaded, so printing is disabled.".to_string();
+            return;
+        }
+
         match write_printable_ledger(&self.print_path(false), &[self.selected_wallet().clone()]) {
-            Ok(path) => self.open_printable_file(path),
+            Ok(path) => self.open_printable_file(&path),
             Err(err) => self.status = format!("Could not create printable ledger: {err}"),
         }
     }
 
     fn print_all_wallets(&mut self) {
+        if !self.save_enabled {
+            self.status = "Saved data could not be loaded, so printing is disabled.".to_string();
+            return;
+        }
+
         match write_printable_ledger(&self.print_path(true), &self.data.wallets) {
-            Ok(path) => self.open_printable_file(path),
+            Ok(path) => self.open_printable_file(&path),
             Err(err) => self.status = format!("Could not create printable ledger: {err}"),
         }
     }
 
-    fn open_printable_file(&mut self, path: PathBuf) {
-        match opener::open(&path) {
+    fn open_printable_file(&mut self, path: &PathBuf) {
+        match opener::open(path) {
             Ok(()) => self.status = format!("Opened printable ledger: {}", path.display()),
             Err(err) => {
                 self.status = format!(
@@ -354,16 +409,34 @@ impl CofferlyApp {
 
         self.data_path
             .parent()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
+            .map_or_else(|| PathBuf::from("."), PathBuf::from)
             .join(file_name)
     }
 
     fn save_with_success(&mut self, success_status: impl Into<String>) {
+        if !self.save_enabled {
+            self.status = "Saved data could not be loaded, so changes are disabled.".to_string();
+            return;
+        }
+
         match save_app_data(&self.data_path, &self.data) {
             Ok(()) => self.status = success_status.into(),
             Err(err) => self.status = format!("Could not save: {err}"),
         }
+    }
+
+    fn can_change(&mut self, locked_status: &str) -> bool {
+        if !self.save_enabled {
+            self.status = "Saved data could not be loaded, so changes are disabled.".to_string();
+            return false;
+        }
+
+        if !self.parent_unlocked {
+            self.status = locked_status.to_string();
+            return false;
+        }
+
+        true
     }
 }
 
@@ -481,7 +554,7 @@ impl CofferlyApp {
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
-                    let pin_entry_width = PIN_LENGTH as f32 * 64.0 + (PIN_LENGTH - 1) as f32 * 12.0;
+                    let pin_entry_width = 4.0 * 64.0 + 3.0 * 12.0;
                     ui.add_space(((ui.available_width() - pin_entry_width) / 2.0).max(0.0));
 
                     for index in 0..PIN_LENGTH {

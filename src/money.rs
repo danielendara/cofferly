@@ -62,12 +62,12 @@ pub fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
 
 pub fn format_money(cents: i64) -> String {
     let sign = if cents < 0 { "-" } else { "" };
-    let absolute = cents.abs();
+    let absolute = cents.unsigned_abs();
     format!("{sign}${}.{:02}", absolute / 100, absolute % 100)
 }
 
 pub fn format_money_input(cents: i64) -> String {
-    let absolute = cents.abs();
+    let absolute = cents.unsigned_abs();
     format!("{}.{:02}", absolute / 100, absolute % 100)
 }
 
@@ -112,5 +112,11 @@ mod tests {
     fn formats_money() {
         assert_eq!(format_money(19400), "$194.00");
         assert_eq!(format_money(-500), "-$5.00");
+    }
+
+    #[test]
+    fn formats_minimum_i64_without_panicking() {
+        assert_eq!(format_money(i64::MIN), "-$92233720368547758.08");
+        assert_eq!(format_money_input(i64::MIN), "92233720368547758.08");
     }
 }
