@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::data::Wallet;
+use crate::data::{LedgerSort, Wallet};
 use crate::money::format_money;
 
 pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
@@ -22,25 +22,18 @@ pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<Path
             "<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Balance</th></tr></thead><tbody>",
         );
 
-        let start_row = format!(
-            "<tr><td>Start</td><td>Starting balance</td><td>{}</td><td>{}</td></tr>",
-            format_money(wallet.starting_balance_cents),
-            format_money(wallet.starting_balance_cents)
-        );
-        body.push_str(&start_row);
-
-        for (entry, balance) in wallet.rows_with_balance() {
+        for ledger_row in wallet.ledger_rows_sorted(LedgerSort::OldestFirst) {
             let row = format!(
                 "<tr><td>{}</td><td>{}</td><td class=\"{}\">{}</td><td>{}</td></tr>",
-                entry.date.format("%m/%d/%Y"),
-                escape_html(&entry.description),
-                if entry.amount_cents < 0 {
+                ledger_row.date.label(),
+                escape_html(ledger_row.description),
+                if ledger_row.amount_cents < 0 {
                     "minus"
                 } else {
                     "plus"
                 },
-                format_money(entry.amount_cents),
-                format_money(balance)
+                format_money(ledger_row.amount_cents),
+                format_money(ledger_row.balance_cents)
             );
             body.push_str(&row);
         }

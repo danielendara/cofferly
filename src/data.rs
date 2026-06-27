@@ -1,10 +1,12 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 
 pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
 pub const MAX_CHILD_NAME_CHARS: usize = 40;
 pub const MAX_ABSOLUTE_CENTS: i64 = 99_999_999_999;
+pub const STARTING_BALANCE_DESCRIPTION: &str = "Starting balance";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppData {
@@ -38,6 +40,29 @@ pub enum LedgerSort {
     OldestFirst,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerRowDate {
+    Start,
+    Entry(NaiveDate),
+}
+
+impl LedgerRowDate {
+    pub fn label(self) -> String {
+        match self {
+            Self::Start => "Start".to_owned(),
+            Self::Entry(date) => date.format("%m/%d/%Y").to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LedgerRow<'a> {
+    pub date: LedgerRowDate,
+    pub description: &'a str,
+    pub amount_cents: i64,
+    pub balance_cents: i64,
+}
+
 impl LedgerSort {
     pub fn toggle(&mut self) {
         *self = match self {
@@ -56,15 +81,28 @@ impl Wallet {
             })
     }
 
-    pub fn rows_with_balance(&self) -> Vec<(&Entry, i64)> {
+    pub fn ledger_rows(&self) -> Vec<LedgerRow<'_>> {
         let mut balance = self.starting_balance_cents;
-        self.entries
-            .iter()
-            .map(|entry| {
-                balance = clamp_cents(balance.saturating_add(entry.amount_cents));
-                (entry, balance)
-            })
-            .collect()
+        let mut rows = Vec::with_capacity(self.entries.len() + 1);
+
+        rows.push(LedgerRow {
+            date: LedgerRowDate::Start,
+            description: STARTING_BALANCE_DESCRIPTION,
+            amount_cents: self.starting_balance_cents,
+            balance_cents: self.starting_balance_cents,
+        });
+
+        for entry in &self.entries {
+            balance = clamp_cents(balance.saturating_add(entry.amount_cents));
+            rows.push(LedgerRow {
+                date: LedgerRowDate::Entry(entry.date),
+                description: &entry.description,
+                amount_cents: entry.amount_cents,
+                balance_cents: balance,
+            });
+        }
+
+        rows
     }
 
     pub fn balances_are_valid(&self) -> bool {
@@ -94,24 +132,31 @@ impl Wallet {
         Some(balances)
     }
 
-    pub fn rows_with_balance_sorted(&self, sort: LedgerSort) -> Vec<(&Entry, i64)> {
-        let mut rows: Vec<_> = self.rows_with_balance().into_iter().enumerate().collect();
+    pub fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
+        let mut rows: Vec<_> = self.ledger_rows().into_iter().enumerate().collect();
 
-        rows.sort_by(
-            |(left_index, (left_entry, _)), (right_index, (right_entry, _))| {
-                let chronological = left_entry
-                    .date
-                    .cmp(&right_entry.date)
-                    .then_with(|| left_index.cmp(right_index));
+        rows.sort_by(|(left_index, left_row), (right_index, right_row)| {
+            let chronological = compare_ledger_row_dates(left_row.date, right_row.date)
+                .then_with(|| left_index.cmp(right_index));
 
-                match sort {
-                    LedgerSort::NewestFirst => chronological.reverse(),
-                    LedgerSort::OldestFirst => chronological,
-                }
-            },
-        );
+            match sort {
+                LedgerSort::NewestFirst => chronological.reverse(),
+                LedgerSort::OldestFirst => chronological,
+            }
+        });
 
         rows.into_iter().map(|(_, row)| row).collect()
+    }
+}
+
+fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
+    match (left, right) {
+        (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
+        (LedgerRowDate::Start, LedgerRowDate::Entry(_)) => Ordering::Less,
+        (LedgerRowDate::Entry(_), LedgerRowDate::Start) => Ordering::Greater,
+        (LedgerRowDate::Entry(left_date), LedgerRowDate::Entry(right_date)) => {
+            left_date.cmp(&right_date)
+        }
     }
 }
 
@@ -269,15 +314,15 @@ mod tests {
             ],
         };
 
-        let rows = wallet.rows_with_balance_sorted(LedgerSort::NewestFirst);
-        let descriptions: Vec<_> = rows
-            .iter()
-            .map(|(entry, _)| entry.description.as_str())
-            .collect();
-        let balances: Vec<_> = rows.iter().map(|(_, balance)| *balance).collect();
+        let rows = wallet.ledger_rows_sorted(LedgerSort::NewestFirst);
+        let descriptions: Vec<_> = rows.iter().map(|row| row.description).collect();
+        let balances: Vec<_> = rows.iter().map(|row| row.balance_cents).collect();
 
-        assert_eq!(descriptions, ["Latest", "Second", "First"]);
-        assert_eq!(balances, [1400, 1300, 1500]);
+        assert_eq!(
+            descriptions,
+            ["Latest", "Second", "First", "Starting balance"]
+        );
+        assert_eq!(balances, [1400, 1300, 1500, 1000]);
     }
 
     #[test]
@@ -299,12 +344,9 @@ mod tests {
             ],
         };
 
-        let rows = wallet.rows_with_balance_sorted(LedgerSort::OldestFirst);
-        let descriptions: Vec<_> = rows
-            .iter()
-            .map(|(entry, _)| entry.description.as_str())
-            .collect();
+        let rows = wallet.ledger_rows_sorted(LedgerSort::OldestFirst);
+        let descriptions: Vec<_> = rows.iter().map(|row| row.description).collect();
 
-        assert_eq!(descriptions, ["First", "Second"]);
+        assert_eq!(descriptions, ["Starting balance", "First", "Second"]);
     }
 }

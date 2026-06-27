@@ -822,7 +822,7 @@ impl CofferlyApp {
     fn ledger_table(&mut self, ui: &mut egui::Ui) {
         let ledger_sort = self.ledger_sort;
         let wallet = self.selected_wallet();
-        let rows = wallet.rows_with_balance_sorted(ledger_sort);
+        let rows = wallet.ledger_rows_sorted(ledger_sort);
         let mut toggle_sort = false;
 
         egui_extras::TableBuilder::new(ui)
@@ -862,37 +862,22 @@ impl CofferlyApp {
                 });
             })
             .body(|mut body| {
-                body.row(30.0, |mut row| {
-                    row.col(|ui| {
-                        ui.label("Start");
-                    });
-                    row.col(|ui| {
-                        ui.label("Starting balance");
-                    });
-                    row.col(|ui| {
-                        ui.label(format_money(wallet.starting_balance_cents));
-                    });
-                    row.col(|ui| {
-                        ui.strong(format_money(wallet.starting_balance_cents));
-                    });
-                });
-
-                for (entry, balance) in rows {
+                for ledger_row in rows {
                     body.row(30.0, |mut row| {
                         row.col(|ui| {
-                            ui.label(entry.date.format("%m/%d/%Y").to_string());
+                            ui.label(ledger_row.date.label());
                         });
                         row.col(|ui| {
-                            ui.label(&entry.description);
+                            ui.label(ledger_row.description);
                         });
                         row.col(|ui| {
                             ui.label(
-                                RichText::new(format_money(entry.amount_cents))
-                                    .color(amount_color(entry.amount_cents)),
+                                RichText::new(format_money(ledger_row.amount_cents))
+                                    .color(amount_color(ledger_row.amount_cents)),
                             );
                         });
                         row.col(|ui| {
-                            ui.strong(format_money(balance));
+                            ui.strong(format_money(ledger_row.balance_cents));
                         });
                     });
                 }
