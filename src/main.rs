@@ -184,7 +184,7 @@ impl CofferlyApp {
             // This is important when copying an old data file to another computer.
             if let Some(raw) = &self.raw_bytes {
                 if !crypto::is_encrypted(raw) {
-                    match save_encrypted(&self.data_path, &self.data, &entered) {
+                    match self.save_encrypted_and_refresh(&entered) {
                         Ok(()) => {
                             self.status =
                                 "Parent mode unlocked (data file migrated to encrypted format)."
@@ -504,7 +504,8 @@ impl CofferlyApp {
 
         let save_result = if self.parent_unlocked {
             // Always save encrypted once we have a valid PIN.
-            save_encrypted(&self.data_path, &self.data, &self.data.parent_pin)
+            let pin = self.data.parent_pin.clone();
+            self.save_encrypted_and_refresh(&pin)
         } else {
             // Should not normally happen for mutable operations.
             save_app_data(&self.data_path, &self.data)
@@ -514,6 +515,12 @@ impl CofferlyApp {
             Ok(()) => self.status = success_status.into(),
             Err(err) => self.status = format!("Could not save: {err}"),
         }
+    }
+
+    fn save_encrypted_and_refresh(&mut self, pin: &str) -> Result<(), String> {
+        save_encrypted(&self.data_path, &self.data, pin)?;
+        self.raw_bytes = io::load_raw(&self.data_path);
+        Ok(())
     }
 
     fn can_change(&mut self, locked_status: &str) -> bool {

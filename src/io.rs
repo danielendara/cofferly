@@ -293,6 +293,31 @@ mod tests {
     }
 
     #[test]
+    fn save_encrypted_replaces_existing_file() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "cofferly-replace-encrypted-save-test-{}",
+            std::process::id()
+        ));
+        let path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let mut data = default_app_data();
+        let pin = "1234";
+
+        save_encrypted(&path, &data, pin).unwrap();
+        let first_raw = load_raw(&path).unwrap();
+
+        data.wallets[0].child_name = "Encrypted Child".to_owned();
+        save_encrypted(&path, &data, pin).unwrap();
+        let second_raw = load_raw(&path).unwrap();
+        let decrypted = crate::crypto::decrypt(&second_raw, pin).unwrap();
+        let loaded = serde_json::from_slice::<AppData>(&decrypted).unwrap();
+
+        assert_ne!(first_raw, second_raw);
+        assert_eq!(loaded.wallets[0].child_name, "Encrypted Child");
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
     fn rejects_invalid_current_data_without_replacing_it_with_legacy_data() {
         let test_dir =
             std::env::temp_dir().join(format!("cofferly-invalid-data-test-{}", std::process::id()));
