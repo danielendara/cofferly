@@ -1,4 +1,12 @@
-use eframe::egui::{self, Color32};
+use eframe::egui::{self, vec2, Color32, Stroke};
+
+pub const ACCENT: Color32 = Color32::from_rgb(42, 157, 143); // Teal - modern, trustworthy
+pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(33, 37, 41);
+pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(108, 117, 125);
+pub const POSITIVE: Color32 = Color32::from_rgb(40, 167, 69);
+pub const NEGATIVE: Color32 = Color32::from_rgb(220, 53, 69);
+pub const CARD_BG: Color32 = Color32::from_rgb(248, 249, 250);
+pub const BORDER: Color32 = Color32::from_rgb(222, 226, 230);
 
 pub fn balance_color(cents: i64) -> Color32 {
     cents_color(cents)
@@ -10,17 +18,34 @@ pub fn amount_color(cents: i64) -> Color32 {
 
 fn cents_color(cents: i64) -> Color32 {
     if cents < 0 {
-        Color32::from_rgb(176, 48, 48)
+        NEGATIVE
     } else {
-        Color32::from_rgb(30, 110, 80)
+        POSITIVE
     }
 }
 
 pub fn configure_style(ctx: &egui::Context) {
     let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(36, 87, 122);
-    style.visuals.selection.bg_fill = Color32::from_rgb(36, 87, 122);
+
+    // Modern, clean spacing
+    style.spacing.item_spacing = vec2(12.0, 8.0);
+    style.spacing.button_padding = vec2(12.0, 6.0);
+    style.spacing.window_margin = egui::Margin::same(12);
+
+    // Clean visuals
+    style.visuals.widgets.active.bg_fill = ACCENT;
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    style.visuals.selection.bg_fill = ACCENT;
+    style.visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+
+    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(233, 236, 239);
+    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(222, 226, 230);
+
+    // Subtle panel / window look
+    style.visuals.panel_fill = Color32::WHITE;
+    style.visuals.window_fill = Color32::WHITE;
+    style.visuals.window_stroke = Stroke::new(1.0, BORDER);
+
     ctx.set_global_style(style);
 }
 
