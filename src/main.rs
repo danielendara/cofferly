@@ -79,11 +79,20 @@ impl CofferlyApp {
         configure_style(&cc.egui_ctx);
 
         let data_path = data_path();
-        let raw_bytes = io::load_raw(&data_path);
+        let (raw_bytes, raw_load_error) = match io::load_raw(&data_path) {
+            Ok(raw_bytes) => (raw_bytes, None),
+            Err(err) => (None, Some(err)),
+        };
 
         // Try to load as plain JSON for backward compat / first run.
         // If the file is encrypted, we'll decrypt it on successful PIN entry.
-        let (data, save_enabled, status) = if let Some(bytes) = &raw_bytes {
+        let (data, save_enabled, status) = if let Some(err) = raw_load_error {
+            (
+                default_app_data(),
+                false,
+                format!("Could not read saved data: {err}. Changes are disabled."),
+            )
+        } else if let Some(bytes) = &raw_bytes {
             if crypto::is_encrypted(bytes) {
                 // Encrypted file — we will decrypt after PIN entry.
                 // Use defaults until unlocked.
@@ -184,7 +193,8 @@ impl CofferlyApp {
             // This is important when copying an old data file to another computer.
             if let Some(raw) = &self.raw_bytes {
                 if !crypto::is_encrypted(raw) {
-                    match self.save_encrypted_and_refresh(&entered) {
+                    let data = self.data.clone();
+                    match self.save_encrypted_data_and_refresh(&data, &entered) {
                         Ok(()) => {
                             self.status =
                                 "Parent mode unlocked (data file migrated to encrypted format)."
@@ -272,8 +282,18 @@ impl CofferlyApp {
             return;
         }
 
-        self.data.parent_pin = std::mem::take(&mut self.new_pin_input);
-        self.save_with_success("Parent PIN updated.");
+        let mut updated_data = self.data.clone();
+        updated_data.parent_pin = self.new_pin_input.clone();
+        let new_pin = updated_data.parent_pin.clone();
+
+        match self.save_encrypted_data_and_refresh(&updated_data, &new_pin) {
+            Ok(()) => {
+                self.data = updated_data;
+                self.new_pin_input.clear();
+                self.status = "Parent PIN updated.".to_string();
+            }
+            Err(err) => self.status = format!("Could not save: {err}"),
+        }
     }
 
     fn add_entry(&mut self) {
@@ -494,8 +514,9 @@ impl CofferlyApp {
 
         let save_result = if self.parent_unlocked {
             // Always save encrypted once we have a valid PIN.
-            let pin = self.data.parent_pin.clone();
-            self.save_encrypted_and_refresh(&pin)
+            let data = self.data.clone();
+            let pin = data.parent_pin.clone();
+            self.save_encrypted_data_and_refresh(&data, &pin)
         } else {
             // Should not normally happen for mutable operations.
             save_app_data(&self.data_path, &self.data)
@@ -507,9 +528,12 @@ impl CofferlyApp {
         }
     }
 
-    fn save_encrypted_and_refresh(&mut self, pin: &str) -> Result<(), String> {
-        save_encrypted(&self.data_path, &self.data, pin)?;
-        self.raw_bytes = io::load_raw(&self.data_path);
+    fn save_encrypted_data_and_refresh(&mut self, data: &AppData, pin: &str) -> Result<(), String> {
+        save_encrypted(&self.data_path, data, pin)?;
+        self.raw_bytes = Some(
+            io::load_raw(&self.data_path)?
+                .ok_or_else(|| format!("Saved data missing from {}", self.data_path.display()))?,
+        );
         Ok(())
     }
 
@@ -535,7 +559,7 @@ impl eframe::App for CofferlyApp {
             return;
         }
 
-        egui::Panel::top("header").show_inside(ui, |ui| {
+        egui::Panel::top("header").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.heading(
@@ -566,7 +590,7 @@ impl eframe::App for CofferlyApp {
             .resizable(false)
             .min_size(180.0)
             .max_size(220.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new("Wallets")
@@ -673,7 +697,7 @@ impl eframe::App for CofferlyApp {
                 });
             });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.wallet_header(ui);
             ui.add_space(10.0);
             self.quick_actions(ui);
@@ -691,7 +715,7 @@ impl eframe::App for CofferlyApp {
 
 impl CofferlyApp {
     fn lock_screen(&mut self, ui: &mut egui::Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.15); // Responsive top padding
 

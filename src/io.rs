@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -107,8 +108,12 @@ fn load_app_data(path: &PathBuf) -> Result<AppData, String> {
     .ok_or_else(|| format!("Saved data in {} is invalid", path.display()))
 }
 
-pub fn load_raw(path: &PathBuf) -> Option<Vec<u8>> {
-    fs::read(path).ok()
+pub fn load_raw(path: &PathBuf) -> Result<Option<Vec<u8>>, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("Could not read {}: {err}", path.display())),
+    }
 }
 
 pub fn save_encrypted(path: &PathBuf, data: &AppData, pin: &str) -> Result<(), String> {
@@ -116,40 +121,25 @@ pub fn save_encrypted(path: &PathBuf, data: &AppData, pin: &str) -> Result<(), S
         serde_json::to_vec(data).map_err(|err| format!("Failed to serialize data: {err}"))?;
     let encrypted = crate::crypto::encrypt(&json, pin)?;
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("Could not find parent folder for {}", path.display()))?;
-    let mut temp_file = tempfile::NamedTempFile::new_in(parent).map_err(|err| err.to_string())?;
-    temp_file
-        .write_all(&encrypted)
-        .map_err(|err| err.to_string())?;
-    temp_file
-        .as_file_mut()
-        .sync_all()
-        .map_err(|err| err.to_string())?;
-    temp_file
-        .persist(path)
-        .map_err(|err| err.error.to_string())?;
-
-    Ok(())
+    write_atomically(path, &encrypted)
 }
 
 pub fn save_app_data(path: &PathBuf, data: &AppData) -> Result<(), String> {
+    let contents = serde_json::to_string_pretty(data).map_err(|err| err.to_string())?;
+    write_atomically(path, contents.as_bytes())
+}
+
+fn write_atomically(path: &PathBuf, contents: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
-    let contents = serde_json::to_string_pretty(data).map_err(|err| err.to_string())?;
     let parent = path
         .parent()
         .ok_or_else(|| format!("Could not find parent folder for {}", path.display()))?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent).map_err(|err| err.to_string())?;
     temp_file
-        .write_all(contents.as_bytes())
+        .write_all(contents)
         .map_err(|err| err.to_string())?;
     temp_file
         .as_file_mut()
@@ -303,11 +293,11 @@ mod tests {
         let pin = "1234";
 
         save_encrypted(&path, &data, pin).unwrap();
-        let first_raw = load_raw(&path).unwrap();
+        let first_raw = load_raw(&path).unwrap().unwrap();
 
         data.wallets[0].child_name = "Encrypted Child".to_owned();
         save_encrypted(&path, &data, pin).unwrap();
-        let second_raw = load_raw(&path).unwrap();
+        let second_raw = load_raw(&path).unwrap().unwrap();
         let decrypted = crate::crypto::decrypt(&second_raw, pin).unwrap();
         let loaded = serde_json::from_slice::<AppData>(&decrypted).unwrap();
 
