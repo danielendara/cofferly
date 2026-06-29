@@ -3,7 +3,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     XChaCha20Poly1305,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::SysRng, TryRng};
 
 /// Magic version byte for the encrypted file format.
 pub const ENCRYPTED_VERSION: u8 = 1;
@@ -35,11 +35,14 @@ fn derive_key(pin: &str, salt: &[u8]) -> Result<[u8; 32], String> {
 /// Encrypts the plaintext using a key derived from the PIN.
 /// Returns a versioned blob: [version][salt][nonce][ciphertext]
 pub fn encrypt(plaintext: &[u8], pin: &str) -> Result<Vec<u8>, String> {
+    let mut rng = SysRng;
     let mut salt = [0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    rng.try_fill_bytes(&mut salt)
+        .map_err(|e| format!("random salt generation failed: {e}"))?;
 
     let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    rng.try_fill_bytes(&mut nonce)
+        .map_err(|e| format!("random nonce generation failed: {e}"))?;
 
     let key = derive_key(pin, &salt)?;
     let cipher = XChaCha20Poly1305::new((&key).into());
@@ -73,7 +76,9 @@ pub fn decrypt(encrypted: &[u8], pin: &str) -> Result<Vec<u8>, String> {
     }
 
     let salt = &encrypted[1..=SALT_LEN];
-    let nonce = &encrypted[1 + SALT_LEN..1 + SALT_LEN + NONCE_LEN];
+    let nonce: &[u8; NONCE_LEN] = encrypted[1 + SALT_LEN..1 + SALT_LEN + NONCE_LEN]
+        .try_into()
+        .map_err(|_| "invalid nonce length".to_string())?;
     let ciphertext = &encrypted[1 + SALT_LEN + NONCE_LEN..];
 
     let key = derive_key(pin, salt)?;
