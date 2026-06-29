@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 argon2 = "0.5"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 eframe = "0.35"
