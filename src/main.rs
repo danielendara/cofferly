@@ -564,8 +564,8 @@ impl eframe::App for CofferlyApp {
 
         egui::Panel::left("wallet_picker")
             .resizable(false)
-            .min_width(180.0)
-            .max_width(220.0)
+            .min_size(180.0)
+            .max_size(220.0)
             .show_inside(ui, |ui| {
                 ui.add_space(8.0);
                 ui.label(
