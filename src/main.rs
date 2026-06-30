@@ -608,12 +608,12 @@ impl eframe::App for CofferlyApp {
                         [188.0, 58.0],
                         egui::Button::selectable(selected, "")
                             .fill(if selected {
-                                theme::ACCENT_LIGHT
+                                theme::ACCENT
                             } else {
-                                Color32::WHITE
+                                theme::CARD_BG
                             })
                             .stroke(if selected {
-                                egui::Stroke::new(1.5, theme::ACCENT)
+                                egui::Stroke::new(1.0, theme::ACCENT)
                             } else {
                                 egui::Stroke::new(1.0, theme::BORDER)
                             }),
@@ -707,8 +707,22 @@ impl eframe::App for CofferlyApp {
             self.balance_tools(ui);
             ui.add_space(8.0);
             self.entry_form(ui);
-            ui.add_space(12.0);
-            self.ledger_table(ui);
+            ui.add_space(8.0);
+            egui::Frame::new()
+                .fill(theme::CARD_BG)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(10, 8))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("Ledger")
+                            .strong()
+                            .size(13.0)
+                            .color(theme::TEXT_PRIMARY),
+                    );
+                    ui.add_space(4.0);
+                    self.ledger_table(ui);
+                });
         });
     }
 }
@@ -1073,7 +1087,7 @@ impl CofferlyApp {
             .column(egui_extras::Column::remainder().at_least(200.0))
             .column(egui_extras::Column::initial(90.0).at_least(70.0))
             .column(egui_extras::Column::initial(100.0).at_least(80.0))
-            .header(20.0, |mut header| {
+            .header(22.0, |mut header| {
                 header.col(|ui| {
                     let label = match ledger_sort {
                         LedgerSort::NewestFirst => "Date ▼",
@@ -1097,28 +1111,40 @@ impl CofferlyApp {
                     }
                 });
                 header.col(|ui| {
-                    ui.label(egui::RichText::new("Description").strong().size(11.0));
+                    ui.label(
+                        egui::RichText::new("Description")
+                            .strong()
+                            .size(11.0)
+                            .color(theme::TEXT_PRIMARY),
+                    );
                 });
                 header.col(|ui| {
-                    ui.label(egui::RichText::new("Amount").strong().size(11.0));
+                    ui.label(
+                        egui::RichText::new("Amount")
+                            .strong()
+                            .size(11.0)
+                            .color(theme::TEXT_PRIMARY),
+                    );
                 });
                 header.col(|ui| {
-                    ui.label(egui::RichText::new("Balance").strong().size(11.0));
+                    ui.label(
+                        egui::RichText::new("Balance")
+                            .strong()
+                            .size(11.0)
+                            .color(theme::TEXT_PRIMARY),
+                    );
                 });
             })
             .body(|mut body| {
                 for (i, ledger_row) in rows.iter().enumerate() {
                     let is_start = i == 0 && matches!(ledger_row.date, LedgerRowDate::Start);
-                    let row_h = if is_start { 18.0 } else { 20.0 };
+                    // Compact start row to save space; normal rows taller for readability
+                    let row_h = if is_start { 16.0 } else { 22.0 };
                     body.row(row_h, |mut row| {
                         row.col(|ui| {
                             let date_text = egui::RichText::new(ledger_row.date.label())
-                                .size(if is_start { 10.0 } else { 11.0 })
-                                .color(if is_start {
-                                    theme::TEXT_SECONDARY
-                                } else {
-                                    theme::TEXT_SECONDARY
-                                });
+                                .size(if is_start { 9.0 } else { 10.0 })
+                                .color(theme::TEXT_SECONDARY);
                             ui.label(date_text);
                         });
                         row.col(|ui| {
@@ -1136,13 +1162,13 @@ impl CofferlyApp {
                         });
                         row.col(|ui| {
                             let amt = egui::RichText::new(format_money(ledger_row.amount_cents))
-                                .size(if is_start { 11.0 } else { 12.0 })
+                                .size(if is_start { 10.0 } else { 11.0 })
                                 .color(amount_color(ledger_row.amount_cents));
                             ui.label(amt);
                         });
                         row.col(|ui| {
                             let bal = egui::RichText::new(format_money(ledger_row.balance_cents))
-                                .size(if is_start { 11.0 } else { 12.0 })
+                                .size(if is_start { 10.0 } else { 11.0 })
                                 .strong()
                                 .color(balance_color(ledger_row.balance_cents));
                             ui.label(bal);

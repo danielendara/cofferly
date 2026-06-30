@@ -3,11 +3,12 @@ use eframe::egui::{self, vec2, Color32, Stroke};
 pub const ACCENT: Color32 = Color32::from_rgb(42, 157, 143); // Teal - modern, trustworthy
 pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(230, 245, 243); // Very light teal for subtle fills
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(33, 37, 41);
-pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(108, 117, 125);
+pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(100, 108, 117);
 pub const POSITIVE: Color32 = Color32::from_rgb(40, 167, 69);
 pub const NEGATIVE: Color32 = Color32::from_rgb(220, 53, 69);
-pub const CARD_BG: Color32 = Color32::from_rgb(255, 255, 255); // Match background for lower contrast
-pub const BORDER: Color32 = Color32::from_rgb(240, 240, 240); // Very subtle border
+pub const CARD_BG: Color32 = Color32::from_rgb(250, 250, 251); // Subtle off-white card background for separation
+pub const BORDER: Color32 = Color32::from_rgb(222, 226, 230); // Visible but soft border
+pub const FAINT_BG: Color32 = Color32::from_rgb(246, 247, 249); // Subtle stripe / alt row bg
 
 pub fn balance_color(cents: i64) -> Color32 {
     cents_color(cents)
@@ -46,6 +47,7 @@ pub fn configure_style(ctx: &egui::Context) {
     style.visuals.panel_fill = Color32::WHITE;
     style.visuals.window_fill = Color32::WHITE;
     style.visuals.window_stroke = Stroke::new(1.0, BORDER);
+    style.visuals.faint_bg_color = FAINT_BG;
 
     ctx.set_global_style(style);
 }
