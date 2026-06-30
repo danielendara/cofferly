@@ -22,8 +22,8 @@ const PIN_LENGTH: usize = 4;
 const LOCK_SCREEN_IMAGE_BYTES: &[u8] = include_bytes!("../assets/cofferly-lock.jpg");
 
 use data::{
-    default_app_data, valid_cents, valid_child_name, valid_pin, AppData, Entry, EntryKind,
-    LedgerRowDate, LedgerSort, Wallet,
+    default_app_data, valid_cents, valid_child_name, valid_description, valid_pin, AppData, Entry,
+    EntryKind, LedgerRowDate, LedgerSort, Wallet,
 };
 use io::{data_path, load_app_data_with_legacy, save_app_data, save_encrypted};
 use money::{format_money, format_money_input, parse_dollars_to_cents};
@@ -72,6 +72,7 @@ struct CofferlyApp {
     status: String,
     data_path: PathBuf,
     lock_screen_image: Option<egui::TextureHandle>,
+    show_settings: bool,
 }
 
 impl CofferlyApp {
@@ -149,6 +150,7 @@ impl CofferlyApp {
             status,
             data_path,
             lock_screen_image: load_lock_screen_image(&cc.egui_ctx),
+            show_settings: false,
         }
     }
 
@@ -314,8 +316,8 @@ impl CofferlyApp {
         }
 
         let description = self.draft.description.trim().to_owned();
-        if description.is_empty() {
-            self.status = "Add a short description first.".to_string();
+        if !valid_description(&self.draft.description) {
+            self.status = "Add a description (1-100 characters).".to_string();
             return;
         }
 
@@ -671,22 +673,6 @@ impl eframe::App for CofferlyApp {
                 }
 
                 ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-
-                ui.label(egui::RichText::new("Change PIN").strong().size(13.0));
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.new_pin_input)
-                        .password(true)
-                        .desired_width(100.0)
-                        .hint_text("4 digits"),
-                );
-                if ui
-                    .add_sized([80.0, 26.0], egui::Button::new("Save").fill(theme::ACCENT))
-                    .clicked()
-                {
-                    self.update_pin();
-                }
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(
@@ -700,14 +686,8 @@ impl eframe::App for CofferlyApp {
         egui::CentralPanel::default().show(ui, |ui| {
             self.wallet_header(ui);
             ui.add_space(10.0);
-            self.quick_actions(ui);
-            ui.add_space(8.0);
-            self.wallet_settings(ui);
-            ui.add_space(8.0);
-            self.balance_tools(ui);
-            ui.add_space(8.0);
-            self.entry_form(ui);
-            ui.add_space(8.0);
+
+            // Ledger at the top for primary view
             egui::Frame::new()
                 .fill(theme::CARD_BG)
                 .stroke(egui::Stroke::new(1.0, theme::BORDER))
@@ -723,7 +703,16 @@ impl eframe::App for CofferlyApp {
                     ui.add_space(4.0);
                     self.ledger_table(ui);
                 });
+
+            ui.add_space(10.0);
+            self.quick_actions(ui);
+            ui.add_space(8.0);
+            self.entry_form(ui);
         });
+
+        if self.show_settings {
+            self.show_settings_window(ui.ctx());
+        }
     }
 }
 
@@ -853,32 +842,179 @@ impl CofferlyApp {
         });
     }
 
-    fn wallet_header(&self, ui: &mut egui::Ui) {
+    fn wallet_header(&mut self, ui: &mut egui::Ui) {
         let wallet = self.selected_wallet();
+        let name = wallet.child_name.clone();
+        let balance = wallet.current_balance_cents();
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    egui::RichText::new(&wallet.child_name)
-                        .size(28.0)
+                    egui::RichText::new(&name)
+                        .size(26.0)
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
                 ui.label(
                     egui::RichText::new("Running balance")
-                        .size(12.0)
+                        .size(11.0)
                         .color(theme::TEXT_SECONDARY),
                 );
             });
+
+            ui.add_space(16.0);
+
+            ui.label(
+                egui::RichText::new(format_money(balance))
+                    .size(32.0)
+                    .strong()
+                    .color(balance_color(balance)),
+            );
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(format_money(wallet.current_balance_cents()))
-                        .size(36.0)
-                        .strong()
-                        .color(balance_color(wallet.current_balance_cents())),
-                );
+                if ui
+                    .add_sized(
+                        [92.0, 28.0],
+                        egui::Button::new("Settings").fill(theme::ACCENT),
+                    )
+                    .clicked()
+                {
+                    // Prefill inputs for a nice desktop experience
+                    self.child_name_input = name;
+                    self.starting_balance_input = format_money_input(balance);
+                    self.new_child_name_input.clear();
+                    self.new_pin_input.clear();
+                    self.show_settings = true;
+                }
             });
         });
+    }
+
+    fn show_settings_window(&mut self, ctx: &egui::Context) {
+        if !self.show_settings {
+            return;
+        }
+
+        let mut open = true;
+
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .default_width(420.0)
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                let selected_name = self.selected_wallet().child_name.clone();
+                let current_balance = self.selected_wallet().current_balance_cents();
+
+                // Wallet management
+                ui.label(egui::RichText::new("Wallet").strong().size(14.0));
+                ui.add_space(4.0);
+
+                egui::Grid::new("settings_wallet_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        // Rename
+                        ui.label(egui::RichText::new("Rename").size(12.0));
+                        ui.add_sized(
+                            [180.0, 24.0],
+                            egui::TextEdit::singleline(&mut self.child_name_input)
+                                .hint_text(&selected_name),
+                        );
+                        ui.end_row();
+
+                        ui.label("");
+                        if ui.add_sized([80.0, 24.0], egui::Button::new("Rename")).clicked() {
+                            self.rename_selected_child();
+                        }
+                        ui.end_row();
+
+                        ui.separator();
+                        ui.end_row();
+
+                        // Starting balance
+                        ui.label(egui::RichText::new("Starting balance").size(12.0));
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [100.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.starting_balance_input)
+                                    .hint_text(format_money_input(current_balance)),
+                            );
+                            if ui.add_sized([70.0, 24.0], egui::Button::new("Update")).clicked() {
+                                self.update_starting_balance();
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.separator();
+                        ui.end_row();
+
+                        // Remove latest
+                        ui.label("");
+                        if ui
+                            .add_sized([150.0, 24.0], egui::Button::new("Remove latest entry"))
+                            .clicked()
+                        {
+                            self.remove_latest_entry();
+                        }
+                    });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Add wallet
+                ui.label(egui::RichText::new("Add wallet").strong().size(14.0));
+                ui.add_space(4.0);
+
+                egui::Grid::new("settings_add_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Child name").size(12.0));
+                        ui.add_sized(
+                            [180.0, 24.0],
+                            egui::TextEdit::singleline(&mut self.new_child_name_input)
+                                .hint_text("New child"),
+                        );
+                        ui.end_row();
+
+                        ui.label("");
+                        if ui.add_sized([80.0, 24.0], egui::Button::new("Add")).clicked() {
+                            self.add_child_wallet();
+                        }
+                    });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Parent PIN
+                ui.label(egui::RichText::new("Parent PIN").strong().size(14.0));
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("New PIN").size(12.0));
+                    ui.add_sized(
+                        [100.0, 24.0],
+                        egui::TextEdit::singleline(&mut self.new_pin_input)
+                            .password(true)
+                            .hint_text("4 digits"),
+                    );
+                    if ui.add_sized([70.0, 24.0], egui::Button::new("Save")).clicked() {
+                        self.update_pin();
+                    }
+                });
+
+                ui.add_space(12.0);
+                if ui.button("Close").clicked() {
+                    self.show_settings = false;
+                }
+            });
+
+        if !open {
+            self.show_settings = false;
+        }
     }
 
     fn quick_actions(&mut self, ui: &mut egui::Ui) {
@@ -922,102 +1058,6 @@ impl CofferlyApp {
             });
     }
 
-    fn wallet_settings(&mut self, ui: &mut egui::Ui) {
-        let selected_child_name = self.selected_wallet().child_name.clone();
-
-        egui::Frame::new()
-            .fill(theme::CARD_BG)
-            .stroke(egui::Stroke::new(1.0, theme::BORDER))
-            .corner_radius(egui::CornerRadius::same(6))
-            .inner_margin(egui::Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                ui.label(egui::RichText::new("Child names").strong().size(13.0));
-                ui.add_space(6.0);
-
-                egui::Grid::new("wallet_settings_grid")
-                    .num_columns(2)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Rename selected").size(12.0));
-                        ui.add_sized(
-                            [160.0, 24.0],
-                            egui::TextEdit::singleline(&mut self.child_name_input)
-                                .hint_text(selected_child_name),
-                        );
-                        ui.end_row();
-
-                        ui.label("");
-                        if ui
-                            .add_sized([80.0, 24.0], egui::Button::new("Rename"))
-                            .clicked()
-                        {
-                            self.rename_selected_child();
-                        }
-                        ui.end_row();
-
-                        ui.separator();
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Add new wallet").size(12.0));
-                        ui.add_sized(
-                            [160.0, 24.0],
-                            egui::TextEdit::singleline(&mut self.new_child_name_input)
-                                .hint_text("Child name"),
-                        );
-                        ui.end_row();
-
-                        ui.label("");
-                        if ui
-                            .add_sized([80.0, 24.0], egui::Button::new("Add"))
-                            .clicked()
-                        {
-                            self.add_child_wallet();
-                        }
-                    });
-            });
-    }
-
-    fn balance_tools(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .fill(theme::CARD_BG)
-            .stroke(egui::Stroke::new(1.0, theme::BORDER))
-            .corner_radius(egui::CornerRadius::same(6))
-            .inner_margin(egui::Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                ui.label(egui::RichText::new("Balance tools").strong().size(13.0));
-                ui.add_space(6.0);
-
-                egui::Grid::new("balance_grid")
-                    .num_columns(2)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Starting balance").size(12.0));
-                        ui.add_sized(
-                            [100.0, 24.0],
-                            egui::TextEdit::singleline(&mut self.starting_balance_input)
-                                .hint_text("90.00"),
-                        );
-                        if ui
-                            .add_sized([70.0, 24.0], egui::Button::new("Update"))
-                            .clicked()
-                        {
-                            self.update_starting_balance();
-                        }
-                        ui.end_row();
-
-                        ui.separator();
-                        ui.end_row();
-
-                        if ui
-                            .add_sized([140.0, 24.0], egui::Button::new("Remove latest entry"))
-                            .clicked()
-                        {
-                            self.remove_latest_entry();
-                        }
-                    });
-            });
-    }
-
     fn entry_form(&mut self, ui: &mut egui::Ui) {
         egui::Frame::new()
             .fill(theme::CARD_BG)
@@ -1051,7 +1091,8 @@ impl CofferlyApp {
                         ui.add_sized(
                             [240.0, 24.0],
                             egui::TextEdit::singleline(&mut self.draft.description)
-                                .hint_text("Game, birthday, allowance"),
+                                .char_limit(100)
+                                .hint_text("Max 100 characters"),
                         );
                         ui.end_row();
 

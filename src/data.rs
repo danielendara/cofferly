@@ -6,6 +6,7 @@ pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
 pub const MAX_CHILD_NAME_CHARS: usize = 40;
 pub const MAX_ABSOLUTE_CENTS: i64 = 99_999_999_999;
+pub const MAX_DESCRIPTION_CHARS: usize = 100;
 pub const STARTING_BALANCE_DESCRIPTION: &str = "Starting balance";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +209,11 @@ pub fn valid_child_name(name: &str) -> bool {
 
 pub fn valid_cents(cents: i64) -> bool {
     cents.unsigned_abs() <= MAX_ABSOLUTE_CENTS as u64
+}
+
+pub fn valid_description(desc: &str) -> bool {
+    let trimmed = desc.trim();
+    !trimmed.is_empty() && trimmed.chars().count() <= MAX_DESCRIPTION_CHARS
 }
 
 fn clamp_cents(cents: i64) -> i64 {
