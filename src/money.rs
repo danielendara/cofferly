@@ -67,8 +67,9 @@ pub fn format_money(cents: i64) -> String {
 }
 
 pub fn format_money_input(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
     let absolute = cents.unsigned_abs();
-    format!("{}.{:02}", absolute / 100, absolute % 100)
+    format!("{sign}{}.{:02}", absolute / 100, absolute % 100)
 }
 
 #[cfg(test)]
@@ -117,6 +118,8 @@ mod tests {
     #[test]
     fn formats_minimum_i64_without_panicking() {
         assert_eq!(format_money(i64::MIN), "-$92233720368547758.08");
-        assert_eq!(format_money_input(i64::MIN), "92233720368547758.08");
+        // Input format preserves the sign instead of dropping it.
+        assert_eq!(format_money_input(i64::MIN), "-92233720368547758.08");
+        assert_eq!(format_money_input(-500), "-5.00");
     }
 }

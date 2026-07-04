@@ -2,6 +2,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::path::PathBuf;
+use zeroize::Zeroizing;
 
 use crate::data::{normalize_app_data, AppData, Wallet, DEFAULT_PARENT_PIN};
 use crate::{
@@ -117,8 +118,9 @@ pub fn load_raw(path: &PathBuf) -> Result<Option<Vec<u8>>, String> {
 }
 
 pub fn save_encrypted(path: &PathBuf, data: &AppData, pin: &str) -> Result<(), String> {
-    let json =
-        serde_json::to_vec(data).map_err(|err| format!("Failed to serialize data: {err}"))?;
+    let json = Zeroizing::new(
+        serde_json::to_vec(data).map_err(|err| format!("Failed to serialize data: {err}"))?,
+    );
     let encrypted = crate::crypto::encrypt(&json, pin)?;
 
     write_atomically(path, &encrypted)
