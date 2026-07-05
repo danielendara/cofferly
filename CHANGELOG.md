@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Add encryption for the local data file using Argon2id key derivation + XChaCha20-Poly1305 authenticated encryption. Data is encrypted at rest with the parent PIN to prevent casual tampering. Old plain JSON files (including legacy imports) are automatically migrated on first successful unlock.
+- Adds a Settings window for wallet management, parent PIN updates, starting balance edits, wallet deletion confirmation, and remove-entry undo.
+- Splits rendering code into a dedicated views module and zeroizes derived keys plus plaintext serialization/decryption buffers when they are dropped.
+- Refreshes README screenshots and updates documentation for the current Cofferly UI and security model.
 - Renames the app to Cofferly after product-name collisions with previous AirWallet and Atlas Wallet names.
 - Preserves automatic legacy data import for previous Atlas Wallet, TallyNest, and original AirWallet installs.
 - Updates all references in code, docs, build scripts, installer, tests, screenshots, and GitHub workflows.
