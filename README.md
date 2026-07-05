@@ -2,11 +2,15 @@
 
 Cofferly is a small Windows-friendly Rust desktop app for tracking money held for kids.
 
+Parent PIN screen:
+
 ![Cofferly parent PIN screen](docs/screenshots/cofferly-pin-screen.png)
+
+Unlocked wallet ledger:
 
 ![Cofferly child wallet ledger](docs/screenshots/cofferly-wallet-screen.png)
 
-It starts with two neutral child wallets. Each wallet keeps a local ledger of deposits and deductions, similar to a handwritten allowance sheet:
+Cofferly starts with two neutral child wallets. Each wallet keeps a local ledger of deposits and deductions, similar to a handwritten allowance sheet:
 
 - Starting balance
 - Money added
@@ -17,6 +21,7 @@ It starts with two neutral child wallets. Each wallet keeps a local ledger of de
 - Parent PIN unlock
 - Printable ledgers
 - Custom child wallet names
+- Local encrypted data file
 
 ## Download
 
@@ -36,7 +41,7 @@ The zip will be created in `dist/`.
 
 ## Parent PIN
 
-Cofferly opens to a parent PIN screen so kids cannot add or remove entries without a parent unlocking the app first.
+Cofferly opens to a parent PIN screen so kids cannot add, remove, rename, or print entries without a parent unlocking the app first.
 
 The first-run PIN is:
 
@@ -44,7 +49,7 @@ The first-run PIN is:
 1234
 ```
 
-After unlocking, use **Change PIN** in the left sidebar to choose a different 4 digit PIN.
+After unlocking, open **Settings** to choose a different 4-digit PIN.
 
 The PIN is used both to unlock the interface and to derive the key for encrypting the data file on disk. It is a simple family-use protection (4 digits), not high-security encryption.
 
@@ -52,13 +57,15 @@ The PIN is used both to unlock the interface and to derive the key for encryptin
 
 Cofferly starts with `Child 1` and `Child 2` so the public app does not include anyone's real names.
 
-After unlocking parent mode, use **Child names** to rename the selected wallet or add another child wallet.
+After unlocking parent mode, open **Settings** to rename the selected wallet, update its starting balance, add another child wallet, or delete a wallet. Wallet deletion uses a confirm/cancel step and keeps at least one wallet available.
+
+Use **Remove latest entry** in Settings to undo the most recent ledger entry for the selected wallet. The app offers a short undo window before the next change.
 
 ## Printing
 
 Use **Print this ledger** to print the selected child's ledger, or **Print both ledgers** to print both child wallets together.
 
-Cofferly creates a local printable HTML file and opens it in your browser with the print dialog ready.
+Cofferly creates a local printable HTML file and opens it in your browser.
 
 ## Windows Installer
 
@@ -92,6 +99,8 @@ Data files are encrypted at rest using the parent PIN (Argon2id key derivation +
 
 Old plain JSON files (including imports from Atlas Wallet / TallyNest / AirWallet) are automatically migrated to the encrypted format the first time you successfully unlock with the parent PIN.
 
+Derived keys and plaintext serialization/decryption buffers are zeroized when dropped. The app's goal is family-use privacy and tamper resistance, not protection against a determined attacker who has the data file and can brute-force all 10,000 PINs offline.
+
 If `cargo` is not on PATH on Windows, add Rust's Cargo folder to PATH:
 
 ```powershell
@@ -121,4 +130,3 @@ Repository protection recommendations are documented in [docs/GITHUB_SETTINGS.md
 ## License
 
 MIT
-
