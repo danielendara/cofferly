@@ -142,4 +142,12 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported"));
     }
+
+    #[test]
+    fn truncated_payloads_fail_without_panicking() {
+        for length in 0..(1 + SALT_LEN + NONCE_LEN) {
+            let truncated = vec![ENCRYPTED_VERSION; length];
+            assert!(decrypt(&truncated, "1234").is_err());
+        }
+    }
 }

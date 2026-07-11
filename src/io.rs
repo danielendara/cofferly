@@ -263,6 +263,42 @@ mod tests {
     }
 
     #[test]
+    fn imports_airwallet_data_when_newer_formats_do_not_exist() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "cofferly-airwallet-migration-test-{}",
+            std::process::id()
+        ));
+        let new_path = test_dir.join(APP_NAME).join(DATA_FILE_NAME);
+        let atlas_generic_legacy_path = test_dir.join(ATLAS_LEGACY_APP_NAME).join(DATA_FILE_NAME);
+        let atlas_legacy_path = test_dir
+            .join(ATLAS_LEGACY_APP_NAME)
+            .join(ATLAS_LEGACY_DATA_FILE_NAME);
+        let legacy_path = test_dir.join(LEGACY_APP_NAME).join(LEGACY_DATA_FILE_NAME);
+        let airwallet_legacy_path = test_dir
+            .join(AIRWALLET_LEGACY_APP_NAME)
+            .join(AIRWALLET_LEGACY_DATA_FILE_NAME);
+        let mut data = default_app_data();
+        data.wallets[0].child_name = "Imported child".to_owned();
+
+        save_app_data(&airwallet_legacy_path, &data).unwrap();
+
+        let loaded = load_app_data_with_paths(
+            &new_path,
+            &atlas_generic_legacy_path,
+            &atlas_legacy_path,
+            &legacy_path,
+            &airwallet_legacy_path,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(loaded.wallets[0].child_name, "Imported child");
+        assert!(new_path.exists());
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
     fn stores_current_data_in_generic_file_name() {
         assert_eq!(DATA_FILE_NAME, "data.json");
     }
