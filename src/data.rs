@@ -242,6 +242,34 @@ mod tests {
     }
 
     #[test]
+    fn validates_description_and_amount_boundaries() {
+        assert!(valid_description("Allowance"));
+        assert!(!valid_description("   "));
+        assert!(valid_description(&"a".repeat(MAX_DESCRIPTION_CHARS)));
+        assert!(!valid_description(&"a".repeat(MAX_DESCRIPTION_CHARS + 1)));
+
+        assert!(valid_cents(MAX_ABSOLUTE_CENTS));
+        assert!(valid_cents(-MAX_ABSOLUTE_CENTS));
+        assert!(!valid_cents(MAX_ABSOLUTE_CENTS + 1));
+        assert!(!valid_cents(-(MAX_ABSOLUTE_CENTS + 1)));
+    }
+
+    #[test]
+    fn ledger_sort_toggle_and_date_labels_are_predictable() {
+        let mut sort = LedgerSort::NewestFirst;
+        sort.toggle();
+        assert_eq!(sort, LedgerSort::OldestFirst);
+        sort.toggle();
+        assert_eq!(sort, LedgerSort::NewestFirst);
+
+        assert_eq!(LedgerRowDate::Start.label(), "Start");
+        assert_eq!(
+            LedgerRowDate::Entry(NaiveDate::from_ymd_opt(2026, 7, 11).unwrap()).label(),
+            "07/11/2026"
+        );
+    }
+
+    #[test]
     fn rejects_empty_loaded_wallets() {
         let data = AppData {
             parent_pin: "1234".to_owned(),

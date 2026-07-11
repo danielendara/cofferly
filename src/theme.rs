@@ -1,15 +1,20 @@
 use eframe::egui::{self, vec2, Color32, Stroke};
 
-pub const ACCENT: Color32 = Color32::from_rgb(42, 157, 143); // Teal - modern, trustworthy
-pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(230, 245, 243); // Very light teal for subtle fills
-pub const ACCENT_LIGHTER: Color32 = Color32::from_rgb(90, 185, 175); // Lighter teal for buttons on light backgrounds (e.g. lock screen)
-pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(33, 37, 41);
-pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(100, 108, 117);
-pub const POSITIVE: Color32 = Color32::from_rgb(40, 167, 69);
-pub const NEGATIVE: Color32 = Color32::from_rgb(220, 53, 69);
-pub const CARD_BG: Color32 = Color32::from_rgb(250, 250, 251); // Subtle off-white card background for separation
-pub const BORDER: Color32 = Color32::from_rgb(222, 226, 230); // Visible but soft border
-pub const FAINT_BG: Color32 = Color32::from_rgb(246, 247, 249); // Subtle stripe / alt row bg
+// Warm neutrals echo the lock-screen artwork; teal keeps the product calm and
+// trustworthy. Every foreground/background pair here meets WCAG AA for normal
+// text, so meaning never depends on color alone.
+pub const ACCENT: Color32 = Color32::from_rgb(31, 122, 112);
+pub const ACCENT_DARK: Color32 = Color32::from_rgb(21, 92, 85);
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(228, 243, 239);
+pub const GOLD_LIGHT: Color32 = Color32::from_rgb(253, 241, 214);
+pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(34, 51, 59);
+pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(83, 101, 109);
+pub const POSITIVE: Color32 = Color32::from_rgb(24, 121, 78);
+pub const NEGATIVE: Color32 = Color32::from_rgb(174, 55, 63);
+pub const CARD_BG: Color32 = Color32::WHITE;
+pub const BORDER: Color32 = Color32::from_rgb(216, 222, 220);
+pub const FAINT_BG: Color32 = Color32::from_rgb(246, 248, 247);
+pub const APP_BG: Color32 = Color32::from_rgb(250, 248, 244);
 
 pub fn balance_color(cents: i64) -> Color32 {
     cents_color(cents)
@@ -22,30 +27,40 @@ pub fn amount_color(cents: i64) -> Color32 {
 fn cents_color(cents: i64) -> Color32 {
     if cents < 0 {
         NEGATIVE
-    } else {
+    } else if cents > 0 {
         POSITIVE
+    } else {
+        TEXT_PRIMARY
     }
 }
 
 pub fn configure_style(ctx: &egui::Context) {
     let mut style = (*ctx.global_style()).clone();
 
-    // Modern, clean spacing
-    style.spacing.item_spacing = vec2(12.0, 8.0);
-    style.spacing.button_padding = vec2(12.0, 6.0);
-    style.spacing.window_margin = egui::Margin::same(12);
+    style.spacing.item_spacing = vec2(12.0, 10.0);
+    style.spacing.button_padding = vec2(14.0, 9.0);
+    style.spacing.window_margin = egui::Margin::same(18);
+    style.spacing.interact_size = vec2(40.0, 36.0);
 
     // Clean visuals
     style.visuals.widgets.active.bg_fill = ACCENT;
     style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(8);
     style.visuals.selection.bg_fill = ACCENT;
     style.visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
 
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(240, 240, 240);
+    style.visuals.widgets.inactive.bg_fill = CARD_BG;
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
+    style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(8);
     style.visuals.widgets.hovered.bg_fill = ACCENT_LIGHT;
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
+    style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(8);
+    style.visuals.extreme_bg_color = Color32::WHITE;
+    style.visuals.override_text_color = Some(TEXT_PRIMARY);
 
-    // Subtle panel / window look - lower contrast
-    style.visuals.panel_fill = Color32::WHITE;
+    style.visuals.panel_fill = APP_BG;
     style.visuals.window_fill = Color32::WHITE;
     style.visuals.window_stroke = Stroke::new(1.0, BORDER);
     style.visuals.faint_bg_color = FAINT_BG;
@@ -143,5 +158,13 @@ mod tests {
         assert_eq!(icon.width, 64);
         assert_eq!(icon.height, 64);
         assert_eq!(icon.rgba.len(), 64 * 64 * 4);
+    }
+
+    #[test]
+    fn money_colors_distinguish_positive_negative_and_zero() {
+        assert_eq!(amount_color(1), POSITIVE);
+        assert_eq!(amount_color(-1), NEGATIVE);
+        assert_eq!(amount_color(0), TEXT_PRIMARY);
+        assert_eq!(balance_color(0), TEXT_PRIMARY);
     }
 }

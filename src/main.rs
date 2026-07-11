@@ -641,71 +641,99 @@ impl eframe::App for CofferlyApp {
             return;
         }
 
-        egui::Panel::top("header").show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.heading(
-                    egui::RichText::new(APP_NAME)
-                        .size(26.0)
-                        .strong()
-                        .color(theme::TEXT_PRIMARY),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("Parent mode")
-                        .size(13.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add_sized([80.0, 28.0], egui::Button::new("Lock").fill(theme::ACCENT))
-                        .clicked()
-                    {
-                        self.lock_parent();
-                    }
-                    ui.add_space(8.0);
-                    if ui
-                        .add_sized(
-                            [92.0, 28.0],
-                            egui::Button::new("Settings").fill(theme::ACCENT),
-                        )
-                        .clicked()
-                    {
-                        let wallet = self.selected_wallet();
-                        let name = wallet.child_name.clone();
-                        let bal = wallet.current_balance_cents();
-                        self.child_name_input = name;
-                        self.starting_balance_input = format_money_input(bal);
-                        self.new_child_name_input.clear();
-                        self.new_pin_input.clear();
-                        self.confirm_delete_wallet = false;
-                        self.show_settings = true;
-                    }
+        egui::Panel::top("header")
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::WHITE)
+                    .inner_margin(egui::Margin::symmetric(18, 10))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(
+                        egui::RichText::new(APP_NAME)
+                            .size(24.0)
+                            .strong()
+                            .color(theme::TEXT_PRIMARY),
+                    );
+                    ui.add_space(6.0);
+                    egui::Frame::new()
+                        .fill(theme::ACCENT_LIGHT)
+                        .corner_radius(egui::CornerRadius::same(12))
+                        .inner_margin(egui::Margin::symmetric(10, 5))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("Parent mode unlocked")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(theme::ACCENT_DARK),
+                            );
+                        });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized(
+                                [88.0, 36.0],
+                                egui::Button::new("Lock")
+                                    .fill(theme::ACCENT)
+                                    .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            self.lock_parent();
+                        }
+                        if ui
+                            .add_sized([108.0, 36.0], egui::Button::new("Settings"))
+                            .clicked()
+                        {
+                            let wallet = self.selected_wallet();
+                            let name = wallet.child_name.clone();
+                            let bal = wallet.current_balance_cents();
+                            self.child_name_input = name;
+                            self.starting_balance_input = format_money_input(bal);
+                            self.new_child_name_input.clear();
+                            self.new_pin_input.clear();
+                            self.confirm_delete_wallet = false;
+                            self.show_settings = true;
+                        }
+                        ui.label(
+                            egui::RichText::new("Saved locally")
+                                .size(11.0)
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                    });
                 });
             });
-            ui.add_space(6.0);
-        });
 
         egui::Panel::left("wallet_picker")
             .resizable(false)
-            .min_size(180.0)
-            .max_size(220.0)
+            .min_size(252.0)
+            .max_size(252.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::FAINT_BG)
+                    .inner_margin(egui::Margin::same(16))
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+            )
             .show(ui, |ui| {
-                ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("Wallets")
+                    egui::RichText::new("Family wallets")
                         .strong()
-                        .size(15.0)
+                        .size(16.0)
                         .color(theme::TEXT_PRIMARY),
                 );
-                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("Choose a child to view")
+                        .size(11.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+                ui.add_space(8.0);
 
                 for index in 0..self.data.wallets.len() {
                     let wallet = &self.data.wallets[index];
                     let selected = self.selected_wallet == index;
 
                     let response = ui.add_sized(
-                        [188.0, 58.0],
+                        [220.0, 64.0],
                         egui::Button::selectable(selected, "")
                             .fill(if selected {
                                 theme::ACCENT
@@ -740,7 +768,7 @@ impl eframe::App for CofferlyApp {
                     };
 
                     painter.text(
-                        rect.left_top() + egui::vec2(12.0, 10.0),
+                        rect.left_top() + egui::vec2(14.0, 12.0),
                         egui::Align2::LEFT_TOP,
                         &wallet.child_name,
                         egui::FontId::proportional(15.0),
@@ -748,7 +776,7 @@ impl eframe::App for CofferlyApp {
                     );
 
                     painter.text(
-                        rect.left_bottom() + egui::vec2(12.0, -10.0),
+                        rect.left_bottom() + egui::vec2(14.0, -12.0),
                         egui::Align2::LEFT_BOTTOM,
                         format_money(wallet.current_balance_cents()),
                         egui::FontId::proportional(13.0),
@@ -756,16 +784,16 @@ impl eframe::App for CofferlyApp {
                     );
                 }
 
-                ui.add_space(8.0);
+                ui.add_space(6.0);
 
                 if ui
-                    .add_sized([188.0, 28.0], egui::Button::new("Print this ledger"))
+                    .add_sized([220.0, 34.0], egui::Button::new("Print this wallet"))
                     .clicked()
                 {
                     self.print_selected_wallet();
                 }
                 if ui
-                    .add_sized([188.0, 28.0], egui::Button::new("Print both ledgers"))
+                    .add_sized([220.0, 34.0], egui::Button::new("Print all wallets"))
                     .clicked()
                 {
                     self.print_all_wallets();
@@ -774,38 +802,55 @@ impl eframe::App for CofferlyApp {
                 ui.add_space(12.0);
                 self.entry_form(ui);
 
-                ui.add_space(8.0);
+                ui.add_space(10.0);
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label(
-                        egui::RichText::new(&self.status)
-                            .size(11.0)
-                            .color(theme::TEXT_SECONDARY),
-                    );
+                    egui::Frame::new()
+                        .fill(theme::GOLD_LIGHT)
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::symmetric(10, 8))
+                        .show(ui, |ui| {
+                            ui.set_max_width(200.0);
+                            ui.label(
+                                egui::RichText::new(&self.status)
+                                    .size(11.0)
+                                    .color(theme::TEXT_PRIMARY),
+                            );
+                        });
                 });
             });
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            self.wallet_header(ui);
-            ui.add_space(10.0);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::APP_BG)
+                    .inner_margin(egui::Margin::same(22)),
+            )
+            .show(ui, |ui| {
+                self.wallet_header(ui);
+                ui.add_space(18.0);
 
-            // Ledger at the top for primary view
-            egui::Frame::new()
-                .fill(theme::CARD_BG)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new("Ledger")
-                            .strong()
-                            .size(13.0)
-                            .color(theme::TEXT_PRIMARY),
-                    );
-                    ui.add_space(4.0);
-                    self.ledger_table(ui);
-                });
-        });
+                egui::Frame::new()
+                    .fill(theme::CARD_BG)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .corner_radius(egui::CornerRadius::same(12))
+                    .inner_margin(egui::Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Transaction history")
+                                .strong()
+                                .size(16.0)
+                                .color(theme::TEXT_PRIMARY),
+                        );
+                        ui.label(
+                            egui::RichText::new("A clear record of every change")
+                                .size(11.0)
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                        ui.add_space(8.0);
+                        self.ledger_table(ui);
+                    });
+            });
 
         if self.show_settings {
             self.show_settings_window(ui.ctx());
@@ -842,4 +887,172 @@ fn load_lock_screen_image(ctx: &egui::Context) -> (Option<egui::TextureHandle>, 
     );
 
     (Some(texture), bg_color)
+}
+
+#[cfg(test)]
+mod app_tests {
+    use super::*;
+    use tempfile::{tempdir, TempDir};
+
+    fn test_app() -> (CofferlyApp, TempDir) {
+        let dir = tempdir().unwrap();
+        let app = CofferlyApp {
+            data: default_app_data(),
+            raw_bytes: None,
+            selected_wallet: 0,
+            ledger_sort: LedgerSort::NewestFirst,
+            draft: EntryDraft {
+                description: String::new(),
+                amount: String::new(),
+                kind: EntryKind::Deduction,
+            },
+            starting_balance_input: String::new(),
+            child_name_input: String::new(),
+            new_child_name_input: String::new(),
+            pin_digits: Default::default(),
+            pending_pin_focus: None,
+            new_pin_input: String::new(),
+            parent_unlocked: true,
+            save_enabled: true,
+            status: String::new(),
+            data_path: dir.path().join(DATA_FILE_NAME),
+            lock_screen_image: None,
+            lock_screen_bg: theme::APP_BG,
+            show_settings: false,
+            confirm_delete_wallet: false,
+            undo: None,
+        };
+        (app, dir)
+    }
+
+    fn saved_data(app: &CofferlyApp, pin: &str) -> AppData {
+        let raw = std::fs::read(&app.data_path).unwrap();
+        assert!(crypto::is_encrypted(&raw));
+        let plaintext = crypto::decrypt(&raw, pin).unwrap();
+        serde_json::from_slice(&plaintext).unwrap()
+    }
+
+    #[test]
+    fn pasted_pin_digits_are_distributed_and_non_digits_are_ignored() {
+        let (mut app, _dir) = test_app();
+        app.pin_digits[1] = "9a87".to_owned();
+
+        app.normalize_pin_digit_input(1);
+
+        assert_eq!(app.pin_digits, ["", "9", "8", "7"]);
+        assert_eq!(app.pending_pin_focus, Some(3));
+        assert!(!app.parent_pin_complete());
+
+        app.pin_digits[0] = "1".to_owned();
+        assert!(app.parent_pin_complete());
+        assert_eq!(app.entered_parent_pin(), "1987");
+    }
+
+    #[test]
+    fn encrypted_unlock_accepts_the_right_pin_and_clears_pin_fields() {
+        let (mut app, _dir) = test_app();
+        let mut stored = default_app_data();
+        stored.wallets[0].child_name = "Encrypted wallet".to_owned();
+        let serialized = serde_json::to_vec(&stored).unwrap();
+        app.raw_bytes = Some(crypto::encrypt(&serialized, "2468").unwrap());
+        app.parent_unlocked = false;
+        app.pin_digits = ["2".into(), "4".into(), "6".into(), "8".into()];
+
+        app.unlock_parent();
+
+        assert!(app.parent_unlocked);
+        assert_eq!(app.selected_wallet().child_name, "Encrypted wallet");
+        assert!(app.pin_digits.iter().all(String::is_empty));
+        assert_eq!(app.pending_pin_focus, Some(0));
+        assert_eq!(app.status, "Parent mode unlocked.");
+    }
+
+    #[test]
+    fn encrypted_unlock_rejects_wrong_pin_without_exposing_data() {
+        let (mut app, _dir) = test_app();
+        let mut stored = default_app_data();
+        stored.wallets[0].child_name = "Secret wallet".to_owned();
+        let serialized = serde_json::to_vec(&stored).unwrap();
+        app.raw_bytes = Some(crypto::encrypt(&serialized, "2468").unwrap());
+        app.parent_unlocked = false;
+        app.pin_digits = ["0".into(), "0".into(), "0".into(), "0".into()];
+
+        app.unlock_parent();
+
+        assert!(!app.parent_unlocked);
+        assert_ne!(app.selected_wallet().child_name, "Secret wallet");
+        assert!(app.pin_digits.iter().all(String::is_empty));
+        assert_eq!(app.status, "Wrong PIN or data has been tampered with.");
+    }
+
+    #[test]
+    fn transaction_remove_and_undo_workflow_stays_encrypted() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "$10.50".to_owned();
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().current_balance_cents(), 1050);
+        assert!(app.draft.description.is_empty());
+        assert!(app.status.contains("Added $10.50"));
+        assert_eq!(saved_data(&app, "1234").wallets[0].entries.len(), 1);
+
+        app.remove_latest_entry();
+        assert!(app.selected_wallet().entries.is_empty());
+        assert!(app.undo.is_some());
+        assert!(app.status.contains("Undo available"));
+
+        app.undo_remove_entry();
+        assert_eq!(app.selected_wallet().current_balance_cents(), 1050);
+        assert!(app.undo.is_none());
+        assert_eq!(saved_data(&app, "1234").wallets[0].entries.len(), 1);
+    }
+
+    #[test]
+    fn invalid_transaction_does_not_mutate_or_create_a_file() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Toy".to_owned();
+        app.draft.amount = "not money".to_owned();
+
+        app.add_entry();
+
+        assert!(app.selected_wallet().entries.is_empty());
+        assert!(!app.data_path.exists());
+        assert_eq!(app.status, "Enter a valid amount, like 10 or 10.50.");
+    }
+
+    #[test]
+    fn changing_pin_reencrypts_data_and_rejects_the_old_pin() {
+        let (mut app, _dir) = test_app();
+        app.new_pin_input = "9876".to_owned();
+
+        app.update_pin();
+
+        assert_eq!(app.data.parent_pin, "9876");
+        assert!(app.new_pin_input.is_empty());
+        let raw = std::fs::read(&app.data_path).unwrap();
+        assert!(crypto::decrypt(&raw, "1234").is_err());
+        assert_eq!(saved_data(&app, "9876").parent_pin, "9876");
+    }
+
+    #[test]
+    fn wallet_management_keeps_at_least_one_wallet() {
+        let (mut app, _dir) = test_app();
+        app.new_child_name_input = "Sam".to_owned();
+        app.add_child_wallet();
+
+        assert_eq!(app.data.wallets.len(), 3);
+        assert_eq!(app.selected_wallet().child_name, "Sam");
+
+        app.delete_selected_wallet();
+        app.delete_selected_wallet();
+        app.delete_selected_wallet();
+
+        assert_eq!(app.data.wallets.len(), 1);
+        assert_eq!(app.status, "Keep at least one wallet.");
+        assert_eq!(saved_data(&app, "1234").wallets.len(), 1);
+    }
 }

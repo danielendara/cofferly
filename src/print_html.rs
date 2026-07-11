@@ -48,16 +48,16 @@ pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<Path
 <meta charset="utf-8">
 <title>Cofferly Ledger</title>
 <style>
-body {{ font-family: "Segoe UI", Arial, sans-serif; color: #1d2528; margin: 36px; }}
+body {{ font-family: "Segoe UI", Arial, sans-serif; color: #22333b; margin: 36px; }}
 section {{ break-after: page; margin-bottom: 40px; }}
 h1 {{ font-size: 34px; margin: 0 0 6px; }}
 .balance {{ font-size: 20px; font-weight: 700; margin: 0 0 18px; }}
 table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
 th, td {{ border: 1px solid #9aa7ad; padding: 8px 10px; text-align: left; }}
-th {{ background: #e9f1f4; }}
+th {{ background: #e4f3ef; }}
 td:last-child, th:last-child, td:nth-child(3), th:nth-child(3) {{ text-align: right; }}
-.plus {{ color: #1d7656; font-weight: 700; }}
-.minus {{ color: #b03030; font-weight: 700; }}
+.plus {{ color: #18794e; font-weight: 700; }}
+.minus {{ color: #ae373f; font-weight: 700; }}
 @media print {{ body {{ margin: 0.45in; }} button {{ display: none; }} section:last-child {{ break-after: auto; }} }}
 </style>
 </head>
@@ -110,6 +110,9 @@ fn escape_html(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::Entry;
+    use chrono::NaiveDate;
+    use tempfile::tempdir;
 
     #[test]
     fn creates_safe_ledger_file_stems() {
@@ -124,5 +127,31 @@ mod tests {
             escape_html("Game & Book <gift>"),
             "Game &amp; Book &lt;gift&gt;"
         );
+    }
+
+    #[test]
+    fn writes_complete_printable_ledger_with_escaped_family_data() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested").join("ledger.html");
+        let wallets = vec![Wallet {
+            child_name: "Alex & Sam".to_owned(),
+            starting_balance_cents: 2_000,
+            entries: vec![Entry {
+                date: NaiveDate::from_ymd_opt(2026, 7, 11).unwrap(),
+                description: "Book <sale>".to_owned(),
+                amount_cents: -750,
+            }],
+        }];
+
+        let written = write_printable_ledger(&path, &wallets).unwrap();
+        let html = std::fs::read_to_string(&written).unwrap();
+
+        assert_eq!(written, path);
+        assert!(html.starts_with("<!doctype html>"));
+        assert!(html.contains("Alex &amp; Sam"));
+        assert!(html.contains("Book &lt;sale&gt;"));
+        assert!(html.contains("-$7.50"));
+        assert!(html.contains("$12.50"));
+        assert!(html.contains("window.print()"));
     }
 }
