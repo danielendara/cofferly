@@ -76,23 +76,29 @@ impl CofferlyApp {
                                 ui.input(|input| input.key_pressed(egui::Key::Enter));
 
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 10.0;
-                                let pin_entry_width = 4.0 * 54.0 + 3.0 * 10.0;
+                                ui.spacing_mut().item_spacing.x = 14.0;
+                                let pin_entry_width = 4.0 * 58.0 + 3.0 * 14.0;
                                 ui.add_space(
                                     ((ui.available_width() - pin_entry_width) / 2.0).max(0.0),
                                 );
 
                                 for index in 0..PIN_LENGTH {
-                                    let response = ui.add_sized(
-                                        [54.0, 54.0],
+                                    let (coin_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(58.0, 58.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let response = ui.put(
+                                        coin_rect,
                                         egui::TextEdit::singleline(&mut self.pin_digits[index])
                                             .id(crate::pin_digit_id(index))
                                             .password(true)
-                                            .font(egui::TextStyle::Heading)
+                                            .frame(egui::Frame::NONE)
+                                            .background_color(egui::Color32::TRANSPARENT)
+                                            .text_color(egui::Color32::TRANSPARENT)
                                             .horizontal_align(egui::Align::Center)
                                             .vertical_align(egui::Align::Center)
                                             .char_limit(PIN_LENGTH)
-                                            .desired_width(54.0),
+                                            .desired_width(58.0),
                                     );
 
                                     if response.changed() {
@@ -108,8 +114,23 @@ impl CofferlyApp {
                                         self.pending_pin_focus = Some(index - 1);
                                         ui.ctx().request_repaint();
                                     }
+
+                                    draw_pin_coin(
+                                        ui,
+                                        index,
+                                        coin_rect,
+                                        !self.pin_digits[index].is_empty(),
+                                        response.has_focus(),
+                                    );
                                 }
                             });
+
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("Gold coins fill as you type")
+                                    .size(11.0)
+                                    .color(theme::TEXT_SECONDARY),
+                            );
 
                             if self.parent_pin_complete() && enter_pressed {
                                 self.unlock_parent();
@@ -602,5 +623,49 @@ impl CofferlyApp {
         if toggle_sort {
             self.ledger_sort.toggle();
         }
+    }
+}
+
+fn draw_pin_coin(ui: &egui::Ui, index: usize, rect: egui::Rect, filled: bool, active: bool) {
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new(("pin_coin", index)),
+    ));
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.35;
+
+    if active {
+        painter.circle_filled(center, radius + 8.0, theme::GOLD_LIGHT);
+    }
+
+    painter.circle_filled(
+        center,
+        radius,
+        if filled { theme::GOLD } else { theme::CARD_BG },
+    );
+    painter.circle_stroke(
+        center,
+        radius,
+        egui::Stroke::new(if active { 2.5 } else { 1.5 }, theme::GOLD),
+    );
+
+    if filled {
+        let check_color = theme::ACCENT_DARK;
+        painter.line_segment(
+            [
+                center + egui::vec2(-9.0, 0.0),
+                center + egui::vec2(-2.0, 7.0),
+            ],
+            egui::Stroke::new(2.5, check_color),
+        );
+        painter.line_segment(
+            [
+                center + egui::vec2(-2.0, 7.0),
+                center + egui::vec2(11.0, -8.0),
+            ],
+            egui::Stroke::new(2.5, check_color),
+        );
+    } else if active {
+        painter.circle_filled(center, 3.5, theme::GOLD);
     }
 }

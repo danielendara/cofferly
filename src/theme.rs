@@ -6,6 +6,7 @@ use eframe::egui::{self, vec2, Color32, Stroke};
 pub const ACCENT: Color32 = Color32::from_rgb(31, 122, 112);
 pub const ACCENT_DARK: Color32 = Color32::from_rgb(21, 92, 85);
 pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(228, 243, 239);
+pub const GOLD: Color32 = Color32::from_rgb(224, 157, 55);
 pub const GOLD_LIGHT: Color32 = Color32::from_rgb(253, 241, 214);
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(34, 51, 59);
 pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(83, 101, 109);
