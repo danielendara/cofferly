@@ -673,9 +673,11 @@ impl eframe::App for CofferlyApp {
                         if ui
                             .add_sized(
                                 [88.0, 36.0],
-                                egui::Button::new("Lock")
-                                    .fill(theme::ACCENT)
-                                    .stroke(egui::Stroke::NONE),
+                                egui::Button::new(
+                                    egui::RichText::new("Lock").strong().color(Color32::WHITE),
+                                )
+                                .fill(theme::ACCENT_DARK)
+                                .stroke(egui::Stroke::NONE),
                             )
                             .clicked()
                         {
@@ -715,109 +717,112 @@ impl eframe::App for CofferlyApp {
                     .stroke(egui::Stroke::new(1.0, theme::BORDER)),
             )
             .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("Family wallets")
-                        .strong()
-                        .size(16.0)
-                        .color(theme::TEXT_PRIMARY),
-                );
-                ui.label(
-                    egui::RichText::new("Choose a child to view")
-                        .size(11.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.label(
+                            egui::RichText::new("Family wallets")
+                                .strong()
+                                .size(16.0)
+                                .color(theme::TEXT_PRIMARY),
+                        );
+                        ui.label(
+                            egui::RichText::new("Choose a child to view")
+                                .size(12.0)
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                        ui.add_space(8.0);
 
-                for index in 0..self.data.wallets.len() {
-                    let wallet = &self.data.wallets[index];
-                    let selected = self.selected_wallet == index;
+                        for index in 0..self.data.wallets.len() {
+                            let wallet = &self.data.wallets[index];
+                            let selected = self.selected_wallet == index;
 
-                    let response = ui.add_sized(
-                        [220.0, 64.0],
-                        egui::Button::selectable(selected, "")
-                            .fill(if selected {
-                                theme::ACCENT
-                            } else {
-                                theme::CARD_BG
-                            })
-                            .stroke(if selected {
-                                egui::Stroke::new(1.0, theme::ACCENT)
-                            } else {
-                                egui::Stroke::new(1.0, theme::BORDER)
-                            }),
-                    );
-
-                    if response.clicked() {
-                        self.selected_wallet = index;
-                        self.confirm_delete_wallet = false;
-                    }
-
-                    // Draw content inside the button area using painter for card look
-                    let rect = response.rect;
-                    let painter = ui.painter_at(rect);
-
-                    let text_color = if selected {
-                        Color32::WHITE
-                    } else {
-                        theme::TEXT_PRIMARY
-                    };
-                    let balance_color = if selected {
-                        Color32::WHITE
-                    } else {
-                        balance_color(wallet.current_balance_cents())
-                    };
-
-                    painter.text(
-                        rect.left_top() + egui::vec2(14.0, 12.0),
-                        egui::Align2::LEFT_TOP,
-                        &wallet.child_name,
-                        egui::FontId::proportional(15.0),
-                        text_color,
-                    );
-
-                    painter.text(
-                        rect.left_bottom() + egui::vec2(14.0, -12.0),
-                        egui::Align2::LEFT_BOTTOM,
-                        format_money(wallet.current_balance_cents()),
-                        egui::FontId::proportional(13.0),
-                        balance_color,
-                    );
-                }
-
-                ui.add_space(6.0);
-
-                if ui
-                    .add_sized([220.0, 34.0], egui::Button::new("Print this wallet"))
-                    .clicked()
-                {
-                    self.print_selected_wallet();
-                }
-                if ui
-                    .add_sized([220.0, 34.0], egui::Button::new("Print all wallets"))
-                    .clicked()
-                {
-                    self.print_all_wallets();
-                }
-
-                ui.add_space(12.0);
-                self.entry_form(ui);
-
-                ui.add_space(10.0);
-
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    egui::Frame::new()
-                        .fill(theme::GOLD_LIGHT)
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::symmetric(10, 8))
-                        .show(ui, |ui| {
-                            ui.set_max_width(200.0);
-                            ui.label(
-                                egui::RichText::new(&self.status)
-                                    .size(11.0)
-                                    .color(theme::TEXT_PRIMARY),
+                            let response = ui.add_sized(
+                                [220.0, 64.0],
+                                egui::Button::selectable(selected, "")
+                                    .fill(if selected {
+                                        theme::ACCENT
+                                    } else {
+                                        theme::CARD_BG
+                                    })
+                                    .stroke(if selected {
+                                        egui::Stroke::new(1.0, theme::ACCENT)
+                                    } else {
+                                        egui::Stroke::new(1.0, theme::BORDER)
+                                    }),
                             );
-                        });
-                });
+
+                            if response.clicked() {
+                                self.selected_wallet = index;
+                                self.confirm_delete_wallet = false;
+                            }
+
+                            // Draw content inside the button area using painter for card look
+                            let rect = response.rect;
+                            let painter = ui.painter_at(rect);
+
+                            let text_color = if selected {
+                                Color32::WHITE
+                            } else {
+                                theme::TEXT_PRIMARY
+                            };
+                            let balance_color = if selected {
+                                Color32::WHITE
+                            } else {
+                                balance_color(wallet.current_balance_cents())
+                            };
+
+                            painter.text(
+                                rect.left_top() + egui::vec2(14.0, 12.0),
+                                egui::Align2::LEFT_TOP,
+                                &wallet.child_name,
+                                egui::FontId::proportional(15.0),
+                                text_color,
+                            );
+
+                            painter.text(
+                                rect.left_bottom() + egui::vec2(14.0, -12.0),
+                                egui::Align2::LEFT_BOTTOM,
+                                format_money(wallet.current_balance_cents()),
+                                egui::FontId::proportional(13.0),
+                                balance_color,
+                            );
+                        }
+
+                        ui.add_space(6.0);
+
+                        if ui
+                            .add_sized([220.0, 34.0], egui::Button::new("Print this wallet"))
+                            .clicked()
+                        {
+                            self.print_selected_wallet();
+                        }
+                        if ui
+                            .add_sized([220.0, 34.0], egui::Button::new("Print all wallets"))
+                            .clicked()
+                        {
+                            self.print_all_wallets();
+                        }
+
+                        ui.add_space(12.0);
+                        self.entry_form(ui);
+
+                        ui.add_space(10.0);
+
+                        egui::Frame::new()
+                            .fill(theme::GOLD_LIGHT)
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin::symmetric(10, 8))
+                            .show(ui, |ui| {
+                                ui.set_max_width(200.0);
+                                ui.label(
+                                    egui::RichText::new(&self.status)
+                                        .size(11.0)
+                                        .color(theme::TEXT_PRIMARY),
+                                );
+                            });
+                    });
             });
 
         egui::CentralPanel::default()
@@ -844,7 +849,7 @@ impl eframe::App for CofferlyApp {
                         );
                         ui.label(
                             egui::RichText::new("A clear record of every change")
-                                .size(11.0)
+                                .size(12.0)
                                 .color(theme::TEXT_SECONDARY),
                         );
                         ui.add_space(8.0);
