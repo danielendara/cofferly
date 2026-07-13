@@ -98,7 +98,7 @@ impl CofferlyApp {
                                             .horizontal_align(egui::Align::Center)
                                             .vertical_align(egui::Align::Center)
                                             .char_limit(PIN_LENGTH)
-                                            .desired_width(58.0),
+                                            .desired_width(54.0),
                                     );
 
                                     if response.changed() {
