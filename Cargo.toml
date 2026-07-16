@@ -15,7 +15,7 @@ argon2 = "0.5"
 chacha20poly1305 = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
-eframe = "0.35"
+eframe = { version = "0.35", features = ["persistence"] }
 egui_extras = "0.35"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 opener = "0.8"

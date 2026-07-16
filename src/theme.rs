@@ -14,6 +14,10 @@ pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(83, 101, 109);
 pub const LOCK_TEXT_SECONDARY: Color32 = Color32::from_rgb(64, 80, 88);
 pub const POSITIVE: Color32 = Color32::from_rgb(24, 121, 78);
 pub const NEGATIVE: Color32 = Color32::from_rgb(174, 55, 63);
+/// Soft green wash for success status chips (meets WCAG AA with POSITIVE/ACCENT_DARK text).
+pub const SUCCESS_LIGHT: Color32 = Color32::from_rgb(228, 243, 239);
+/// Soft red wash for error status chips (meets WCAG AA with NEGATIVE text).
+pub const ERROR_LIGHT: Color32 = Color32::from_rgb(252, 232, 233);
 pub const CARD_BG: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_rgb(216, 222, 220);
 pub const FAINT_BG: Color32 = Color32::from_rgb(246, 248, 247);
