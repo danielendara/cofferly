@@ -64,6 +64,26 @@ pub struct LedgerRow<'a> {
     pub balance_cents: i64,
 }
 
+/// Owned ledger row for UI caching (avoids rebuilding borrows every frame).
+#[derive(Debug, Clone)]
+pub struct OwnedLedgerRow {
+    pub date: LedgerRowDate,
+    pub description: String,
+    pub amount_cents: i64,
+    pub balance_cents: i64,
+}
+
+impl OwnedLedgerRow {
+    pub fn from_borrowed(row: LedgerRow<'_>) -> Self {
+        Self {
+            date: row.date,
+            description: row.description.to_owned(),
+            amount_cents: row.amount_cents,
+            balance_cents: row.balance_cents,
+        }
+    }
+}
+
 impl LedgerSort {
     pub fn toggle(&mut self) {
         *self = match self {
@@ -147,6 +167,13 @@ impl Wallet {
         });
 
         rows.into_iter().map(|(_, row)| row).collect()
+    }
+
+    pub fn ledger_rows_sorted_owned(&self, sort: LedgerSort) -> Vec<OwnedLedgerRow> {
+        self.ledger_rows_sorted(sort)
+            .into_iter()
+            .map(OwnedLedgerRow::from_borrowed)
+            .collect()
     }
 }
 

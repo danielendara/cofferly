@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::data::{LedgerSort, Wallet};
 use crate::money::format_money;
 
+/// Write a printable HTML ledger to `path` (typically under the OS temp directory).
 pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;

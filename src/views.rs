@@ -7,14 +7,14 @@
 
 use eframe::egui;
 
-use crate::data::{EntryKind, LedgerRowDate, LedgerSort};
+use crate::data::{LedgerRowDate, LedgerSort};
 use crate::money::format_money;
 use crate::money::format_money_input;
 use crate::theme;
 use crate::theme::amount_color;
 use crate::theme::balance_color;
 use crate::CofferlyApp;
-use crate::{APP_NAME, PIN_LENGTH};
+use crate::{StatusSeverity, APP_NAME, PIN_LENGTH};
 
 impl CofferlyApp {
     pub fn lock_screen(&mut self, ui: &mut egui::Ui) {
@@ -91,6 +91,7 @@ impl CofferlyApp {
 
                                     let enter_pressed =
                                         ui.input(|input| input.key_pressed(egui::Key::Enter));
+                                    let mut pin_changed = false;
 
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 14.0;
@@ -123,6 +124,7 @@ impl CofferlyApp {
 
                                             if response.changed() {
                                                 self.normalize_pin_digit_input(index);
+                                                pin_changed = true;
                                                 ui.ctx().request_repaint();
                                             }
 
@@ -155,34 +157,58 @@ impl CofferlyApp {
                                             .color(theme::LOCK_TEXT_SECONDARY),
                                     );
 
-                                    if self.parent_pin_complete() && enter_pressed {
-                                        self.unlock_parent();
+                                    // Auto-submit as soon as the 4th digit lands (ATM / phone
+                                    // lock convention). Enter and the Unlock button still work
+                                    // for paste / partial flows.
+                                    let should_unlock = !self.unlocking
+                                        && self.parent_pin_complete()
+                                        && (pin_changed || enter_pressed);
+
+                                    if should_unlock {
+                                        self.start_unlock();
                                     }
 
                                     ui.add_space(16.0);
 
+                                    let unlock_enabled = !self.unlocking;
+                                    let unlock_label = if self.unlocking {
+                                        "Unlocking…"
+                                    } else {
+                                        "Unlock"
+                                    };
                                     if ui
-                                        .add_sized(
-                                            [240.0, 42.0],
+                                        .add_enabled(
+                                            unlock_enabled,
                                             egui::Button::new(
-                                                egui::RichText::new("Unlock")
+                                                egui::RichText::new(unlock_label)
                                                     .size(15.0)
                                                     .color(egui::Color32::WHITE)
                                                     .strong(),
                                             )
-                                            .fill(theme::ACCENT_DARK),
+                                            .fill(theme::ACCENT_DARK)
+                                            .min_size(egui::vec2(240.0, 42.0)),
                                         )
                                         .clicked()
                                     {
-                                        self.unlock_parent();
+                                        self.start_unlock();
                                     }
                                 });
 
                             ui.add_space(14.0);
+                            let status_color = match self.status.severity {
+                                StatusSeverity::Error => theme::NEGATIVE,
+                                StatusSeverity::Success => theme::POSITIVE,
+                                StatusSeverity::Info => theme::LOCK_TEXT_SECONDARY,
+                            };
+                            let status_text = if self.status.severity == StatusSeverity::Error {
+                                format!("⚠ {}", self.status.text)
+                            } else {
+                                self.status.text.clone()
+                            };
                             ui.label(
-                                egui::RichText::new(&self.status)
+                                egui::RichText::new(status_text)
                                     .size(13.0)
-                                    .color(theme::LOCK_TEXT_SECONDARY),
+                                    .color(status_color),
                             );
                             ui.add_space(8.0);
                             ui.label(
@@ -235,6 +261,12 @@ impl CofferlyApp {
 
     pub fn show_settings_window(&mut self, ctx: &egui::Context) {
         if !self.show_settings {
+            return;
+        }
+
+        // Esc-to-dismiss is the universal dialog convention.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_settings = false;
             return;
         }
 
@@ -364,7 +396,7 @@ impl CofferlyApp {
                                     .clicked()
                                 {
                                     self.confirm_delete_wallet = false;
-                                    self.status = "Wallet deletion cancelled.".to_string();
+                                    self.set_status_info("Wallet deletion cancelled.");
                                 }
                             } else if ui
                                 .add_sized([130.0, 34.0], egui::Button::new("Delete wallet"))
@@ -372,10 +404,10 @@ impl CofferlyApp {
                                 .clicked()
                             {
                                 self.confirm_delete_wallet = true;
-                                self.status = format!(
+                                self.set_status_info(format!(
                                     "Confirm deletion of {} and all its entries.",
                                     selected_name
-                                );
+                                ));
                             }
                         });
                     });
@@ -500,12 +532,12 @@ impl CofferlyApp {
                     ui.columns(2, |columns| {
                         columns[0].selectable_value(
                             &mut self.draft.kind,
-                            EntryKind::Deposit,
+                            crate::data::EntryKind::Deposit,
                             egui::RichText::new("Money in").size(13.0),
                         );
                         columns[1].selectable_value(
                             &mut self.draft.kind,
-                            EntryKind::Deduction,
+                            crate::data::EntryKind::Deduction,
                             egui::RichText::new("Money out").size(13.0),
                         );
                     });
@@ -517,7 +549,7 @@ impl CofferlyApp {
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
-                ui.add_sized(
+                let desc_response = ui.add_sized(
                     [ui.available_width(), 36.0],
                     egui::TextEdit::singleline(&mut self.draft.description)
                         .char_limit(100)
@@ -530,16 +562,22 @@ impl CofferlyApp {
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
-                ui.add_sized(
+                let amount_response = ui.add_sized(
                     [ui.available_width(), 36.0],
                     egui::TextEdit::singleline(&mut self.draft.amount).hint_text("$0.00"),
                 );
 
+                let enter_submit = ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    && (desc_response.lost_focus()
+                        || amount_response.lost_focus()
+                        || desc_response.has_focus()
+                        || amount_response.has_focus());
+
                 let action = match self.draft.kind {
-                    EntryKind::Deposit => "Add money",
-                    EntryKind::Deduction => "Record spending",
+                    crate::data::EntryKind::Deposit => "Add money",
+                    crate::data::EntryKind::Deduction => "Record spending",
                 };
-                if ui
+                let clicked = ui
                     .add_sized(
                         [ui.available_width(), 40.0],
                         egui::Button::new(
@@ -549,8 +587,9 @@ impl CofferlyApp {
                         )
                         .fill(theme::ACCENT_DARK),
                     )
-                    .clicked()
-                {
+                    .clicked();
+
+                if clicked || enter_submit {
                     self.add_entry();
                 }
             });
@@ -558,9 +597,11 @@ impl CofferlyApp {
 
     pub fn ledger_table(&mut self, ui: &mut egui::Ui) {
         let ledger_sort = self.ledger_sort;
-        let wallet = self.selected_wallet();
-        let rows = wallet.ledger_rows_sorted(ledger_sort);
+        // Rebuild cache if needed, then clone the slice for the table body so we
+        // do not hold a borrow across the TableBuilder (which may need &mut self).
+        let rows = self.cached_ledger_rows().to_vec();
         let mut toggle_sort = false;
+        const ROW_HEIGHT: f32 = 42.0;
 
         egui_extras::TableBuilder::new(ui)
             .striped(true)
@@ -633,58 +674,60 @@ impl CofferlyApp {
                     );
                 });
             })
-            .body(|mut body| {
-                for ledger_row in &rows {
+            .body(|body| {
+                // Virtualized rows: only visible rows are laid out each frame.
+                body.rows(ROW_HEIGHT, rows.len(), |mut row| {
+                    let index = row.index();
+                    let ledger_row = &rows[index];
                     let is_start = matches!(ledger_row.date, LedgerRowDate::Start);
-                    let row_h = if is_start { 34.0 } else { 42.0 };
-                    body.row(row_h, |mut row| {
-                        row.col(|ui| {
-                            let date_text = egui::RichText::new(ledger_row.date.label())
-                                .size(if is_start { 10.0 } else { 11.0 })
-                                .color(theme::TEXT_SECONDARY);
-                            ui.label(date_text);
-                        });
-                        row.col(|ui| {
-                            let desc = if is_start {
-                                egui::RichText::new(ledger_row.description)
-                                    .size(11.0)
-                                    .italics()
-                                    .color(theme::TEXT_SECONDARY)
-                            } else {
-                                egui::RichText::new(ledger_row.description)
-                                    .size(12.0)
-                                    .color(theme::TEXT_PRIMARY)
-                            };
-                            ui.label(desc);
-                        });
-                        row.col(|ui| {
-                            let amount_prefix = if ledger_row.amount_cents > 0 && !is_start {
-                                "+"
-                            } else {
-                                ""
-                            };
-                            let amt = egui::RichText::new(format!(
-                                "{amount_prefix}{}",
-                                format_money(ledger_row.amount_cents)
-                            ))
+
+                    row.col(|ui| {
+                        let date_text = egui::RichText::new(ledger_row.date.label())
                             .size(if is_start { 10.0 } else { 11.0 })
-                            .color(amount_color(ledger_row.amount_cents));
-                            ui.label(amt);
-                        });
-                        row.col(|ui| {
-                            ui.label(
-                                egui::RichText::new(format_money(ledger_row.balance_cents))
-                                    .size(11.0)
-                                    .strong()
-                                    .color(balance_color(ledger_row.balance_cents)),
-                            );
-                        });
+                            .color(theme::TEXT_SECONDARY);
+                        ui.label(date_text);
                     });
-                }
+                    row.col(|ui| {
+                        let desc = if is_start {
+                            egui::RichText::new(&ledger_row.description)
+                                .size(11.0)
+                                .italics()
+                                .color(theme::TEXT_SECONDARY)
+                        } else {
+                            egui::RichText::new(&ledger_row.description)
+                                .size(12.0)
+                                .color(theme::TEXT_PRIMARY)
+                        };
+                        ui.label(desc);
+                    });
+                    row.col(|ui| {
+                        let amount_prefix = if ledger_row.amount_cents > 0 && !is_start {
+                            "+"
+                        } else {
+                            ""
+                        };
+                        let amt = egui::RichText::new(format!(
+                            "{amount_prefix}{}",
+                            format_money(ledger_row.amount_cents)
+                        ))
+                        .size(if is_start { 10.0 } else { 11.0 })
+                        .color(amount_color(ledger_row.amount_cents));
+                        ui.label(amt);
+                    });
+                    row.col(|ui| {
+                        ui.label(
+                            egui::RichText::new(format_money(ledger_row.balance_cents))
+                                .size(11.0)
+                                .strong()
+                                .color(balance_color(ledger_row.balance_cents)),
+                        );
+                    });
+                });
             });
 
         if toggle_sort {
             self.ledger_sort.toggle();
+            self.invalidate_ledger_cache();
         }
     }
 }
