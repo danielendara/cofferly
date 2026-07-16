@@ -55,7 +55,7 @@ fn app_data_base() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-pub fn load_app_data_with_legacy(path: &PathBuf) -> Result<LoadOutcome, String> {
+pub fn load_app_data_with_legacy(path: &Path) -> Result<LoadOutcome, String> {
     load_app_data_with_paths(
         path,
         &atlas_generic_legacy_data_path(),
@@ -66,11 +66,11 @@ pub fn load_app_data_with_legacy(path: &PathBuf) -> Result<LoadOutcome, String> 
 }
 
 fn load_app_data_with_paths(
-    path: &PathBuf,
-    atlas_generic_legacy_path: &PathBuf,
-    atlas_legacy_path: &PathBuf,
-    legacy_path: &PathBuf,
-    airwallet_legacy_path: &PathBuf,
+    path: &Path,
+    atlas_generic_legacy_path: &Path,
+    atlas_legacy_path: &Path,
+    legacy_path: &Path,
+    airwallet_legacy_path: &Path,
 ) -> Result<LoadOutcome, String> {
     if path.exists() {
         // Plain JSON at the current path (manual copy / pre-encryption install).
@@ -102,7 +102,7 @@ fn load_app_data_with_paths(
         return Ok(LoadOutcome {
             data: Some(data),
             migrated_from_legacy: true,
-            retired_legacy_path: Some(legacy.clone()),
+            retired_legacy_path: Some(legacy.to_path_buf()),
         });
     }
 
@@ -125,7 +125,7 @@ fn migrate_legacy_to_encrypted(
         save_encrypted_with_session(new_path, data, &data.parent_pin, &mut session)?;
 
     // Read-back check: the atomic write succeeded and the file is encrypted.
-    let on_disk = load_raw(&new_path.to_path_buf())?
+    let on_disk = load_raw(new_path)?
         .ok_or_else(|| format!("Migrated data missing from {}", new_path.display()))?;
     if !crate::crypto::is_encrypted(&on_disk) {
         return Err(format!(
@@ -153,7 +153,7 @@ fn migrate_legacy_to_encrypted(
     Ok(())
 }
 
-fn load_legacy_app_data(path: &PathBuf) -> Option<AppData> {
+fn load_legacy_app_data(path: &Path) -> Option<AppData> {
     if !path.exists() {
         return None;
     }
@@ -161,7 +161,7 @@ fn load_legacy_app_data(path: &PathBuf) -> Option<AppData> {
     load_app_data(path).ok()
 }
 
-fn load_app_data(path: &PathBuf) -> Result<AppData, String> {
+fn load_app_data(path: &Path) -> Result<AppData, String> {
     let contents = fs::read_to_string(path)
         .map_err(|err| format!("Could not read {}: {err}", path.display()))?;
 
@@ -179,7 +179,7 @@ fn load_app_data(path: &PathBuf) -> Result<AppData, String> {
     .ok_or_else(|| format!("Saved data in {} is invalid", path.display()))
 }
 
-pub fn load_raw(path: &PathBuf) -> Result<Option<Vec<u8>>, String> {
+pub fn load_raw(path: &Path) -> Result<Option<Vec<u8>>, String> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
@@ -190,7 +190,7 @@ pub fn load_raw(path: &PathBuf) -> Result<Option<Vec<u8>>, String> {
 /// Encrypt and write `data`, returning the ciphertext so callers can cache it
 /// without a redundant disk read.
 pub fn save_encrypted(
-    path: &PathBuf,
+    path: &Path,
     data: &AppData,
     pin: &str,
     session: &mut Option<SessionCrypto>,
@@ -213,7 +213,9 @@ fn save_encrypted_with_session(
     Ok(encrypted)
 }
 
-pub fn save_app_data(path: &PathBuf, data: &AppData) -> Result<(), String> {
+/// Plaintext JSON writer used only by unit tests to seed legacy migration fixtures.
+#[cfg(test)]
+fn save_app_data(path: &Path, data: &AppData) -> Result<(), String> {
     let contents = serde_json::to_string_pretty(data).map_err(|err| err.to_string())?;
     write_atomically(path, contents.as_bytes())
 }

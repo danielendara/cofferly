@@ -242,7 +242,7 @@ impl CofferlyApp {
                     default_app_data(),
                     // Migration may have written encrypted data even if legacy delete failed.
                     raw_bytes.is_some() || data_path.exists(),
-                    Status::error(format!("{err}")),
+                    Status::error(err),
                 ),
             }
         };
@@ -366,11 +366,7 @@ impl CofferlyApp {
         self.unlock_parent_sync();
     }
 
-    /// Synchronous unlock used by tests and plain-JSON / first-run paths.
-    fn unlock_parent(&mut self) {
-        self.unlock_parent_sync();
-    }
-
+    /// Synchronous unlock for plain-JSON / first-run paths, and for unit tests.
     fn unlock_parent_sync(&mut self) {
         let entered = self.entered_parent_pin();
 
@@ -1326,7 +1322,7 @@ mod app_tests {
         app.session = None;
         app.pin_digits = ["2".into(), "4".into(), "6".into(), "8".into()];
 
-        app.unlock_parent();
+        app.unlock_parent_sync();
 
         assert!(app.parent_unlocked);
         assert!(app.session.is_some());
@@ -1349,7 +1345,7 @@ mod app_tests {
         app.session = None;
         app.pin_digits = ["0".into(), "0".into(), "0".into(), "0".into()];
 
-        app.unlock_parent();
+        app.unlock_parent_sync();
 
         assert!(!app.parent_unlocked);
         assert!(app.session.is_none());
