@@ -10,6 +10,10 @@ Unlocked wallet ledger:
 
 ![Cofferly child wallet ledger](docs/screenshots/cofferly-wallet-screen.png)
 
+Parent settings:
+
+![Cofferly parent settings](docs/screenshots/cofferly-settings-screen.png)
+
 Cofferly starts with two neutral child wallets. Each wallet keeps a local ledger of deposits and deductions, similar to a handwritten allowance sheet:
 
 - Starting balance

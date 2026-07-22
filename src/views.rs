@@ -7,7 +7,7 @@
 
 use eframe::egui;
 
-use crate::data::{LedgerRowDate, LedgerSort};
+use crate::data::{valid_child_name, valid_pin, LedgerRowDate, LedgerSort};
 use crate::money::format_money;
 use crate::money::format_money_input;
 use crate::theme;
@@ -264,240 +264,361 @@ impl CofferlyApp {
             return;
         }
 
-        // Esc-to-dismiss is the universal dialog convention.
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.show_settings = false;
-            return;
-        }
+        let selected_name = self.selected_wallet().child_name.clone();
+        let current_balance = self.selected_wallet().current_balance_cents();
+        let has_entries = !self.selected_wallet().entries.is_empty();
+        let can_delete_wallet = self.data.wallets.len() > 1;
+        let modal_width = settings_modal_width(ctx.content_rect().width());
+        let scroll_height = settings_scroll_height(ctx.content_rect().height());
+        let mut close_requested = false;
 
-        let mut open = true;
-
-        egui::Window::new("Settings")
-            .open(&mut open)
-            .default_width(520.0)
-            .default_height(600.0)
-            .resizable(true)
-            .collapsible(false)
+        let response = egui::Modal::new(egui::Id::new("settings_modal"))
+            .backdrop_color(egui::Color32::from_black_alpha(96))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::CARD_BG)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .corner_radius(egui::CornerRadius::same(16))
+                    .inner_margin(egui::Margin::same(22)),
+            )
             .show(ctx, |ui| {
-                let selected_name = self.selected_wallet().child_name.clone();
-                let current_balance = self.selected_wallet().current_balance_cents();
+                ui.set_width(modal_width);
 
-                ui.label(
-                    egui::RichText::new("Wallet details")
-                        .strong()
-                        .size(17.0)
-                        .color(theme::TEXT_PRIMARY),
-                );
-                ui.label(
-                    egui::RichText::new(format!("Manage {selected_name}'s wallet"))
-                        .size(12.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(4.0);
-
-                egui::Grid::new("settings_wallet_grid")
-                    .num_columns(2)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| {
-                        // Rename
-                        ui.label(egui::RichText::new("Rename").size(12.0));
-                        ui.add_sized(
-                            [220.0, 34.0],
-                            egui::TextEdit::singleline(&mut self.child_name_input)
-                                .hint_text(&selected_name),
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("Settings")
+                                .size(23.0)
+                                .strong()
+                                .color(theme::TEXT_PRIMARY),
                         );
-                        ui.end_row();
+                        ui.label(
+                            egui::RichText::new("Manage wallets, history, and parent access")
+                                .size(12.0)
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                    });
 
-                        ui.label("");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add_sized([90.0, 34.0], egui::Button::new("Rename"))
+                            .add_sized([76.0, 36.0], egui::Button::new("Close"))
                             .clicked()
                         {
-                            self.rename_selected_child();
+                            close_requested = true;
                         }
-                        ui.end_row();
+                    });
+                });
 
-                        ui.separator();
-                        ui.end_row();
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
 
-                        // Starting balance
-                        ui.label(egui::RichText::new("Starting balance").size(12.0));
-                        ui.horizontal(|ui| {
-                            ui.add_sized(
-                                [130.0, 34.0],
-                                egui::TextEdit::singleline(&mut self.starting_balance_input)
-                                    .hint_text(format_money_input(current_balance)),
-                            );
-                            if ui
-                                .add_sized([80.0, 34.0], egui::Button::new("Update"))
-                                .clicked()
-                            {
-                                self.update_starting_balance();
-                            }
-                        });
-                        ui.end_row();
+                egui::ScrollArea::vertical()
+                    .id_salt("settings_content")
+                    .auto_shrink([false, false])
+                    .max_height(scroll_height)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
 
-                        ui.separator();
-                        ui.end_row();
+                        settings_section(
+                            ui,
+                            &format!("{selected_name}'s wallet"),
+                            "Update this wallet without changing its transaction history.",
+                            theme::CARD_BG,
+                            egui::Stroke::new(1.0, theme::BORDER),
+                            theme::TEXT_PRIMARY,
+                            |ui| {
+                                settings_field_label(ui, "Wallet name");
+                                let rename_ready = valid_child_name(self.child_name_input.trim())
+                                    && self.child_name_input.trim() != selected_name;
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(&mut self.child_name_input)
+                                            .hint_text(&selected_name)
+                                            .char_limit(40),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            rename_ready,
+                                            egui::Button::new("Save name")
+                                                .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.rename_selected_child();
+                                    }
+                                });
 
-                        // Remove latest (with undo)
-                        ui.label("");
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized([165.0, 34.0], egui::Button::new("Remove latest entry"))
-                                .clicked()
-                            {
-                                self.remove_latest_entry();
-                            }
-                            if let Some(removable) = &self.undo {
-                                let enabled =
-                                    self.data.wallets.get(removable.wallet_index).is_some();
-                                let response = ui
-                                    .allocate_ui_with_layout(
-                                        egui::vec2(120.0, 34.0),
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| {
-                                            ui.add_enabled(
+                                ui.add_space(12.0);
+                                settings_field_label(ui, "Starting balance");
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Changes the opening balance; existing entries stay intact.",
+                                    )
+                                    .size(11.0)
+                                    .color(theme::TEXT_SECONDARY),
+                                );
+                                ui.add_space(4.0);
+                                let balance_ready = !self.starting_balance_input.trim().is_empty();
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(
+                                            &mut self.starting_balance_input,
+                                        )
+                                        .hint_text(format_money_input(current_balance)),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            balance_ready,
+                                            egui::Button::new("Save balance")
+                                                .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.update_starting_balance();
+                                    }
+                                });
+
+                                ui.add_space(14.0);
+                                ui.separator();
+                                ui.add_space(10.0);
+                                settings_field_label(ui, "Latest transaction");
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Remove the newest entry. Undo remains available until the next wallet change.",
+                                    )
+                                    .size(11.0)
+                                    .color(theme::TEXT_SECONDARY),
+                                );
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            has_entries,
+                                            egui::Button::new("Remove latest entry")
+                                                .min_size(egui::vec2(152.0, 36.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.remove_latest_entry();
+                                    }
+                                    if let Some(removable) = &self.undo {
+                                        let enabled = self
+                                            .data
+                                            .wallets
+                                            .get(removable.wallet_index)
+                                            .is_some();
+                                        if ui
+                                            .add_enabled(
                                                 enabled,
                                                 egui::Button::new(format!(
                                                     "Undo {}",
                                                     format_money(removable.entry.amount_cents)
                                                 ))
-                                                .min_size(egui::vec2(120.0, 34.0)),
+                                                .min_size(egui::vec2(116.0, 36.0)),
                                             )
-                                        },
-                                    )
-                                    .inner;
-                                if response.clicked() {
-                                    self.undo_remove_entry();
-                                }
-                            }
-                        });
-                        ui.end_row();
-
-                        ui.separator();
-                        ui.end_row();
-
-                        // Delete wallet (keeps at least one)
-                        ui.label("");
-                        ui.horizontal(|ui| {
-                            if self.confirm_delete_wallet {
-                                if ui
-                                    .add_sized([100.0, 34.0], egui::Button::new("Confirm delete"))
-                                    .on_hover_text(
-                                        "Permanently remove this wallet and all its entries.",
-                                    )
-                                    .clicked()
-                                {
-                                    self.delete_selected_wallet();
-                                }
-                                if ui
-                                    .add_sized([75.0, 34.0], egui::Button::new("Cancel"))
-                                    .clicked()
-                                {
-                                    self.confirm_delete_wallet = false;
-                                    self.set_status_info("Wallet deletion cancelled.");
-                                }
-                            } else if ui
-                                .add_sized([130.0, 34.0], egui::Button::new("Delete wallet"))
-                                .on_hover_text("Ask for confirmation before removing this wallet.")
-                                .clicked()
-                            {
-                                self.confirm_delete_wallet = true;
-                                self.set_status_info(format!(
-                                    "Confirm deletion of {} and all its entries.",
-                                    selected_name
-                                ));
-                            }
-                        });
-                    });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                // Add wallet
-                ui.label(
-                    egui::RichText::new("Add a child")
-                        .strong()
-                        .size(17.0)
-                        .color(theme::TEXT_PRIMARY),
-                );
-                ui.label(
-                    egui::RichText::new("Names are stored only on this device")
-                        .size(12.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(4.0);
-
-                egui::Grid::new("settings_add_grid")
-                    .num_columns(2)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Child name").size(12.0));
-                        ui.add_sized(
-                            [220.0, 34.0],
-                            egui::TextEdit::singleline(&mut self.new_child_name_input)
-                                .hint_text("New child"),
+                                            .clicked()
+                                        {
+                                            self.undo_remove_entry();
+                                        }
+                                    }
+                                });
+                            },
                         );
-                        ui.end_row();
 
-                        ui.label("");
-                        if ui
-                            .add_sized([90.0, 34.0], egui::Button::new("Add child"))
-                            .clicked()
-                        {
-                            self.add_child_wallet();
-                        }
+                        ui.add_space(12.0);
+                        settings_section(
+                            ui,
+                            "Add another child",
+                            "Each child gets a separate wallet stored only on this device.",
+                            theme::FAINT_BG,
+                            egui::Stroke::new(1.0, theme::BORDER),
+                            theme::TEXT_PRIMARY,
+                            |ui| {
+                                settings_field_label(ui, "Child name");
+                                let add_ready = valid_child_name(self.new_child_name_input.trim());
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(&mut self.new_child_name_input)
+                                            .hint_text("New child")
+                                            .char_limit(40),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            add_ready,
+                                            egui::Button::new(
+                                                egui::RichText::new("Add wallet")
+                                                    .strong()
+                                                    .color(egui::Color32::WHITE),
+                                            )
+                                            .fill(theme::ACCENT_DARK)
+                                            .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.add_child_wallet();
+                                    }
+                                });
+                            },
+                        );
+
+                        ui.add_space(12.0);
+                        settings_section(
+                            ui,
+                            "Parent PIN",
+                            "The PIN encrypts the local wallet file. Four digits deter casual access, not a determined attacker.",
+                            theme::FAINT_BG,
+                            egui::Stroke::new(1.0, theme::BORDER),
+                            theme::TEXT_PRIMARY,
+                            |ui| {
+                                settings_field_label(ui, "New 4-digit PIN");
+                                let pin_ready = valid_pin(&self.new_pin_input);
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(&mut self.new_pin_input)
+                                            .password(true)
+                                            .hint_text("4 digits")
+                                            .char_limit(PIN_LENGTH),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            pin_ready,
+                                            egui::Button::new("Update PIN")
+                                                .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.update_pin();
+                                    }
+                                });
+                            },
+                        );
+
+                        ui.add_space(12.0);
+                        settings_section(
+                            ui,
+                            "Danger zone",
+                            "Deleting a wallet permanently removes its balance and transaction history.",
+                            theme::ERROR_LIGHT,
+                            egui::Stroke::new(1.0, theme::NEGATIVE),
+                            theme::NEGATIVE,
+                            |ui| {
+                                if !can_delete_wallet {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Cofferly always keeps at least one wallet.",
+                                        )
+                                        .size(12.0)
+                                        .color(theme::TEXT_SECONDARY),
+                                    );
+                                } else if self.confirm_delete_wallet {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "Delete {selected_name} and every entry? This cannot be undone."
+                                        ))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(theme::NEGATIVE),
+                                    );
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .add_sized(
+                                                [154.0, 38.0],
+                                                egui::Button::new(
+                                                    egui::RichText::new("Delete permanently")
+                                                        .strong()
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .fill(theme::NEGATIVE),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.delete_selected_wallet();
+                                        }
+                                        if ui
+                                            .add_sized(
+                                                [82.0, 38.0],
+                                                egui::Button::new("Cancel"),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.confirm_delete_wallet = false;
+                                            self.set_status_info("Wallet deletion cancelled.");
+                                        }
+                                    });
+                                } else if ui
+                                    .add_sized(
+                                        [142.0, 38.0],
+                                        egui::Button::new(
+                                            egui::RichText::new("Delete this wallet")
+                                                .strong()
+                                                .color(theme::NEGATIVE),
+                                        )
+                                        .fill(theme::ERROR_LIGHT)
+                                        .stroke(egui::Stroke::new(1.0, theme::NEGATIVE)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.confirm_delete_wallet = true;
+                                    self.set_status_info(format!(
+                                        "Confirm deletion of {selected_name} and all its entries."
+                                    ));
+                                }
+                            },
+                        );
                     });
 
                 ui.add_space(10.0);
                 ui.separator();
-                ui.add_space(6.0);
-
-                // Parent PIN
-                ui.label(
-                    egui::RichText::new("Parent PIN")
-                        .strong()
-                        .size(17.0)
-                        .color(theme::TEXT_PRIMARY),
-                );
-                ui.label(
-                    egui::RichText::new(
-                        "The PIN encrypts local data. Four digits protect against casual access, not a determined attacker.",
-                    )
-                    .size(12.0)
-                    .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(4.0);
+                ui.add_space(10.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("New PIN").size(12.0));
-                    ui.add_sized(
-                        [120.0, 34.0],
-                        egui::TextEdit::singleline(&mut self.new_pin_input)
-                            .password(true)
-                            .hint_text("4 digits"),
-                    );
-                    if ui
-                        .add_sized([95.0, 34.0], egui::Button::new("Update PIN"))
-                        .clicked()
-                    {
-                        self.update_pin();
-                    }
-                });
+                    let (prefix, status_color) = match self.status.severity {
+                        StatusSeverity::Info => ("", theme::TEXT_SECONDARY),
+                        StatusSeverity::Success => ("", theme::POSITIVE),
+                        StatusSeverity::Error => ("Check: ", theme::NEGATIVE),
+                    };
+                    ui.vertical(|ui| {
+                        ui.set_max_width((modal_width - 150.0).max(220.0));
+                        ui.label(
+                            egui::RichText::new("Changes save automatically on this device")
+                                .size(11.0)
+                                .color(theme::TEXT_SECONDARY),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("{prefix}{}", self.status.text))
+                                .size(11.0)
+                                .color(status_color),
+                        );
+                    });
 
-                ui.add_space(12.0);
-                if ui
-                    .add_sized([100.0, 36.0], egui::Button::new("Done"))
-                    .clicked()
-                {
-                    self.show_settings = false;
-                }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized(
+                                [104.0, 40.0],
+                                egui::Button::new(
+                                    egui::RichText::new("Done")
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(theme::ACCENT_DARK),
+                            )
+                            .clicked()
+                        {
+                            close_requested = true;
+                        }
+                    });
+                });
             });
 
-        if !open {
+        if close_requested || response.should_close() {
             self.show_settings = false;
+            self.confirm_delete_wallet = false;
         }
     }
 
@@ -732,6 +853,67 @@ impl CofferlyApp {
     }
 }
 
+fn settings_modal_width(viewport_width: f32) -> f32 {
+    (viewport_width - 48.0).clamp(360.0, 640.0)
+}
+
+fn settings_scroll_height(viewport_height: f32) -> f32 {
+    (viewport_height - 210.0).clamp(260.0, 520.0)
+}
+
+fn settings_section<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+    title_color: egui::Color32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(title)
+                    .size(16.0)
+                    .strong()
+                    .color(title_color),
+            );
+            ui.label(
+                egui::RichText::new(subtitle)
+                    .size(11.0)
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.add_space(12.0);
+            add_contents(ui)
+        })
+        .inner
+}
+
+fn settings_field_label(ui: &mut egui::Ui, label: &str) {
+    ui.label(
+        egui::RichText::new(label)
+            .size(12.0)
+            .strong()
+            .color(theme::TEXT_PRIMARY),
+    );
+    ui.add_space(4.0);
+}
+
+fn settings_input_action_row<R>(
+    ui: &mut egui::Ui,
+    action_width: f32,
+    add_contents: impl FnOnce(&mut egui::Ui, f32) -> R,
+) -> R {
+    let input_width =
+        (ui.available_width() - action_width - ui.spacing().item_spacing.x).max(160.0);
+    ui.horizontal(|ui| add_contents(ui, input_width)).inner
+}
+
 fn draw_pin_coin(ui: &egui::Ui, index: usize, rect: egui::Rect, filled: bool, active: bool) {
     let painter = ui.ctx().layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
@@ -773,5 +955,24 @@ fn draw_pin_coin(ui: &egui::Ui, index: usize, rect: egui::Rect, filled: bool, ac
         );
     } else if active {
         painter.circle_filled(center, 3.5, theme::GOLD_DARK);
+    }
+}
+
+#[cfg(test)]
+mod settings_layout_tests {
+    use super::*;
+
+    #[test]
+    fn settings_modal_width_adapts_to_the_viewport() {
+        assert_eq!(settings_modal_width(320.0), 360.0);
+        assert_eq!(settings_modal_width(520.0), 472.0);
+        assert_eq!(settings_modal_width(1080.0), 640.0);
+    }
+
+    #[test]
+    fn settings_content_scroll_height_is_bounded() {
+        assert_eq!(settings_scroll_height(420.0), 260.0);
+        assert_eq!(settings_scroll_height(720.0), 510.0);
+        assert_eq!(settings_scroll_height(1200.0), 520.0);
     }
 }
