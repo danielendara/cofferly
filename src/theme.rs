@@ -93,83 +93,17 @@ pub fn configure_style(ctx: &egui::Context) {
 }
 
 pub fn app_icon() -> egui::IconData {
-    const SIZE: u32 = 64;
-    let mut rgba = vec![0_u8; (SIZE * SIZE * 4) as usize];
-
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let index = ((y * SIZE + x) * 4) as usize;
-            let inside = rounded_rect(x, y, 5, 5, 54, 54, 12);
-
-            if inside {
-                rgba[index] = 31;
-                rgba[index + 1] = 126;
-                rgba[index + 2] = 108;
-                rgba[index + 3] = 255;
-            }
-
-            if rounded_rect(x, y, 14, 18, 44, 30, 7) {
-                rgba[index] = 246;
-                rgba[index + 1] = 250;
-                rgba[index + 2] = 248;
-                rgba[index + 3] = 255;
-            }
-
-            if rounded_rect(x, y, 16, 25, 40, 24, 6) {
-                rgba[index] = 227;
-                rgba[index + 1] = 241;
-                rgba[index + 2] = 236;
-                rgba[index + 3] = 255;
-            }
-
-            if rounded_rect(x, y, 42, 30, 8, 8, 4) {
-                rgba[index] = 31;
-                rgba[index + 1] = 126;
-                rgba[index + 2] = 108;
-                rgba[index + 3] = 255;
-            }
-
-            if (20..=44).contains(&x) && (12..=16).contains(&y) {
-                rgba[index] = 255;
-                rgba[index + 1] = 214;
-                rgba[index + 2] = 102;
-                rgba[index + 3] = 255;
-            }
-        }
-    }
+    const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/cofferly-app-icon.png");
+    let rgba = image::load_from_memory(APP_ICON_BYTES)
+        .expect("embedded Cofferly app icon should decode")
+        .to_rgba8();
+    let (width, height) = rgba.dimensions();
 
     egui::IconData {
-        rgba,
-        width: SIZE,
-        height: SIZE,
+        rgba: rgba.into_raw(),
+        width,
+        height,
     }
-}
-
-fn rounded_rect(x: u32, y: u32, left: u32, top: u32, width: u32, height: u32, radius: u32) -> bool {
-    if x < left || y < top || x >= left + width || y >= top + height {
-        return false;
-    }
-
-    let right = left + width - 1;
-    let bottom = top + height - 1;
-    let cx = if x < left + radius {
-        left + radius
-    } else if x > right - radius {
-        right - radius
-    } else {
-        x
-    };
-    let cy = if y < top + radius {
-        top + radius
-    } else if y > bottom - radius {
-        bottom - radius
-    } else {
-        y
-    };
-
-    let dx = i64::from(x) - i64::from(cx);
-    let dy = i64::from(y) - i64::from(cy);
-    dx * dx + dy * dy <= i64::from(radius) * i64::from(radius)
 }
 
 #[cfg(test)]
@@ -200,9 +134,11 @@ mod tests {
     #[test]
     fn app_icon_is_valid_rgba_square() {
         let icon = app_icon();
-        assert_eq!(icon.width, 64);
-        assert_eq!(icon.height, 64);
-        assert_eq!(icon.rgba.len(), 64 * 64 * 4);
+        assert_eq!(icon.width, 512);
+        assert_eq!(icon.height, 512);
+        assert_eq!(icon.rgba.len(), 512 * 512 * 4);
+        assert_eq!(icon.rgba[3], 0);
+        assert_eq!(icon.rgba[(256 * 512 + 256) * 4 + 3], 255);
     }
 
     #[test]

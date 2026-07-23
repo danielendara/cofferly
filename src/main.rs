@@ -22,6 +22,7 @@ pub const AIRWALLET_LEGACY_APP_NAME: &str = "AirWallet";
 pub const AIRWALLET_LEGACY_DATA_FILE_NAME: &str = "airwallet-data.json";
 const PIN_LENGTH: usize = 4;
 const LOCK_SCREEN_IMAGE_BYTES: &[u8] = include_bytes!("../assets/cofferly-lock.jpg");
+const OPEN_COFFER_IMAGE_BYTES: &[u8] = include_bytes!("../assets/cofferly-open.png");
 /// Forgiving default so parents are not locked mid-chore; still protects a
 /// shared family PC left open.
 const AUTO_LOCK_AFTER: Duration = Duration::from_secs(10 * 60);
@@ -136,6 +137,7 @@ struct CofferlyApp {
     data_path: PathBuf,
     lock_screen_image: Option<egui::TextureHandle>,
     lock_screen_bg: egui::Color32,
+    open_coffer_image: Option<egui::TextureHandle>,
     show_settings: bool,
     confirm_delete_wallet: bool,
     undo: Option<RemovableEntry>,
@@ -249,6 +251,7 @@ impl CofferlyApp {
 
         let (selected_wallet, ledger_sort) = restore_ui_state(cc, data.wallets.len());
         let (lock_screen_image, lock_screen_bg) = load_lock_screen_image(&cc.egui_ctx);
+        let open_coffer_image = load_open_coffer_image(&cc.egui_ctx);
 
         Self {
             data,
@@ -274,6 +277,7 @@ impl CofferlyApp {
             data_path,
             lock_screen_image,
             lock_screen_bg,
+            open_coffer_image,
             show_settings: false,
             confirm_delete_wallet: false,
             undo: None,
@@ -1246,6 +1250,20 @@ fn load_lock_screen_image(ctx: &egui::Context) -> (Option<egui::TextureHandle>, 
     (Some(texture), bg_color)
 }
 
+fn load_open_coffer_image(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let rgba = image::load_from_memory(OPEN_COFFER_IMAGE_BYTES)
+        .ok()?
+        .to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+
+    Some(ctx.load_texture(
+        "cofferly-open-coffer-image",
+        color_image,
+        egui::TextureOptions::NEAREST,
+    ))
+}
+
 #[cfg(test)]
 mod app_tests {
     use super::*;
@@ -1277,6 +1295,7 @@ mod app_tests {
             data_path: dir.path().join(DATA_FILE_NAME),
             lock_screen_image: None,
             lock_screen_bg: theme::APP_BG,
+            open_coffer_image: None,
             show_settings: false,
             confirm_delete_wallet: false,
             undo: None,
@@ -1292,6 +1311,18 @@ mod app_tests {
         assert!(crypto::is_encrypted(&raw));
         let (plaintext, _) = crypto::decrypt(&raw, pin).unwrap();
         serde_json::from_slice(&plaintext).unwrap()
+    }
+
+    #[test]
+    fn open_coffer_asset_is_small_valid_and_transparent() {
+        let image = image::load_from_memory(OPEN_COFFER_IMAGE_BYTES)
+            .expect("open coffer asset should decode")
+            .to_rgba8();
+
+        assert!(image.width() <= 512);
+        assert!(image.height() <= 512);
+        assert_eq!(image.get_pixel(0, 0)[3], 0);
+        assert!(image.pixels().any(|pixel| pixel[3] > 0));
     }
 
     #[test]

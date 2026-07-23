@@ -233,8 +233,9 @@ impl CofferlyApp {
         let name = wallet.child_name.clone();
         let balance = wallet.current_balance_cents();
 
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        ui.columns(3, |columns| {
+            columns[0].add_space(31.0);
+            columns[0].vertical(|ui| {
                 ui.label(
                     egui::RichText::new(&name)
                         .size(26.0)
@@ -248,12 +249,35 @@ impl CofferlyApp {
                 );
             });
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            columns[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                if let Some(texture) = &self.open_coffer_image {
+                    egui::Frame::new()
+                        .fill(theme::APP_BG)
+                        .corner_radius(egui::CornerRadius::same(14))
+                        .inner_margin(egui::Margin::symmetric(10, 4))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Image::new(texture)
+                                    .fit_to_exact_size(egui::vec2(142.0, 120.0))
+                                    .texture_options(egui::TextureOptions::NEAREST)
+                                    .alt_text("An open treasure chest overflowing with gold coins"),
+                            );
+                        });
+                }
+            });
+
+            columns[2].add_space(27.0);
+            columns[2].with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
                 ui.label(
                     egui::RichText::new(format_money(balance))
                         .size(32.0)
                         .strong()
                         .color(balance_color(balance)),
+                );
+                ui.label(
+                    egui::RichText::new("Ready to save or spend")
+                        .size(11.0)
+                        .color(theme::TEXT_SECONDARY),
                 );
             });
         });
