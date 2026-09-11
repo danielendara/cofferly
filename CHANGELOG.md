@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### UX
+
+- Print and Export report success in the status chip, and opener failures tell the parent the file was saved and how to open it from the file manager.
+
 ## 0.3.0 — 2026-09-09
 
 CSV export, backdated entries, grouped money, and Coffer Story / Settings hardening after the 0.2.0 cut.

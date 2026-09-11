@@ -1454,16 +1454,16 @@ impl CofferlyApp {
     }
 
     fn open_export_file(&mut self, path: PathBuf, kind: &str) {
+        let result = opener::open(&path).map_err(|err| err.to_string());
+        self.apply_export_open_result(path, kind, result);
+    }
+
+    fn apply_export_open_result(&mut self, path: PathBuf, kind: &str, result: Result<(), String>) {
         self.track_temp_artifact(path.clone());
-        match opener::open(&path) {
-            Ok(()) => self.set_status_ok(format!("Opened {kind}: {}", path.display())),
-            Err(err) => {
-                self.set_status_err(format!(
-                    "{kind} saved to {}, but could not open it: {err}",
-                    path.display()
-                ));
-            }
-        }
+        self.status = match result {
+            Ok(()) => export_opened_status(kind, &path),
+            Err(err) => export_opener_failed_status(kind, &path, err),
+        };
     }
 
     fn print_path(&self, all_wallets: bool) -> Result<PathBuf, String> {
@@ -1837,6 +1837,20 @@ impl CofferlyApp {
                 );
             });
     }
+}
+
+fn export_opened_status(kind: &str, path: &Path) -> Status {
+    Status::success(format!(
+        "Opened {kind}. Print or save it from the window that opened, or find it at {}.",
+        path.display()
+    ))
+}
+
+fn export_opener_failed_status(kind: &str, path: &Path, err: impl std::fmt::Display) -> Status {
+    Status::error(format!(
+        "{kind} was saved to {}, but Cofferly could not open it ({err}). Open that file from your file manager to print or import it.",
+        path.display()
+    ))
 }
 
 fn restore_ui_state(cc: &eframe::CreationContext<'_>, wallet_count: usize) -> (usize, LedgerSort) {
@@ -2784,6 +2798,65 @@ mod app_tests {
         assert_ne!(first, second);
         let _ = std::fs::remove_file(&first);
         let _ = std::fs::remove_file(&second);
+    }
+
+    #[test]
+    fn print_and_export_are_disabled_when_saved_data_cannot_load() {
+        let (mut app, _dir) = test_app();
+        app.save_enabled = false;
+
+        app.print_selected_wallet();
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert!(app.status.text.contains("printing is disabled"));
+
+        app.print_all_wallets();
+        assert!(app.status.text.contains("printing is disabled"));
+
+        app.export_selected_wallet_csv();
+        assert!(app.status.text.contains("export is disabled"));
+
+        app.export_all_wallets_csv();
+        assert!(app.status.text.contains("export is disabled"));
+        assert!(app.temp_artifact_paths.is_empty());
+    }
+
+    #[test]
+    fn print_export_status_chip_reports_opener_success_and_failure() {
+        let (mut app, dir) = test_app();
+        let path = dir.path().join("child-1-ledger.html");
+        std::fs::write(&path, b"<html></html>").unwrap();
+
+        app.apply_export_open_result(path.clone(), "printable ledger", Ok(()));
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+        assert!(app.status.text.contains("Opened printable ledger"));
+        assert!(app.status.text.contains(path.to_string_lossy().as_ref()));
+        assert_eq!(app.temp_artifact_paths.last(), Some(&path));
+
+        app.apply_export_open_result(
+            path.clone(),
+            "CSV ledger",
+            Err("no application found".to_owned()),
+        );
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert!(app.status.text.contains("CSV ledger was saved to"));
+        assert!(app.status.text.contains("could not open it"));
+        assert!(app.status.text.contains("file manager"));
+        assert!(app.status.text.contains("no application found"));
+    }
+
+    #[test]
+    fn export_status_copy_is_actionable() {
+        let path = PathBuf::from("/tmp/cofferly-child-ledger.html");
+        let ok = export_opened_status("printable ledger", &path);
+        assert_eq!(ok.severity, StatusSeverity::Success);
+        assert!(ok.text.contains("Opened printable ledger"));
+        assert!(ok.text.contains("/tmp/cofferly-child-ledger.html"));
+
+        let err = export_opener_failed_status("CSV ledger", &path, "permission denied");
+        assert_eq!(err.severity, StatusSeverity::Error);
+        assert!(err.text.contains("CSV ledger was saved to"));
+        assert!(err.text.contains("permission denied"));
+        assert!(err.text.contains("Open that file from your file manager"));
     }
 
     #[test]
