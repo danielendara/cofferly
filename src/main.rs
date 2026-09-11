@@ -1238,6 +1238,11 @@ impl CofferlyApp {
         }
     }
 
+    fn fill_entry_date_today(&mut self) {
+        self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        self.pending_entry_focus = Some(EntryFormField::Date);
+    }
+
     fn prefill_settings_from_selected(&mut self) {
         let wallet = self.selected_wallet();
         let name = wallet.child_name.clone();
@@ -3179,7 +3184,10 @@ mod app_tests {
         app.add_entry();
 
         assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
-        assert_eq!(app.status.text, "Enter a date like 08/21/2026.");
+        assert_eq!(
+            app.status.text,
+            "Enter a date as MM/DD/YYYY (08/21/2026) or ISO %Y-%m-%d (2026-08-21)."
+        );
         assert_eq!(app.status.severity, StatusSeverity::Error);
         assert!(app.selected_wallet().entries.is_empty());
     }
@@ -3271,6 +3279,47 @@ mod app_tests {
         assert!(app.confirm_negative_cents.is_none());
         assert!(app.selected_wallet().entries.is_empty());
         assert_eq!(app.status.text, "Spending not recorded.");
+    }
+
+    #[test]
+    fn today_control_fills_the_local_date() {
+        let (mut app, _dir) = test_app();
+        app.draft.date_input = "07/01/2020".to_owned();
+        app.pending_entry_focus = None;
+
+        app.fill_entry_date_today();
+
+        assert_eq!(
+            app.draft.date_input,
+            format_ledger_date(Local::now().date_naive())
+        );
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
+    }
+
+    #[test]
+    fn add_entry_accepts_iso_dates_and_focuses_date_on_failure() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "ISO allowance".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.draft.date_input = "2026-07-01".to_owned();
+
+        app.add_entry();
+
+        assert_eq!(
+            app.selected_wallet().entries[0].date,
+            NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
+        );
+
+        app.draft.description = "Bad date".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.draft.date_input = "21-08-2026".to_owned();
+        app.add_entry();
+
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
+        assert!(app.status.text.contains("MM/DD/YYYY"));
+        assert!(app.status.text.contains("%Y-%m-%d"));
+        assert_eq!(app.status.severity, StatusSeverity::Error);
     }
 
     #[test]
