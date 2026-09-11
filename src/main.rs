@@ -198,6 +198,9 @@ pub(crate) struct CofferlyApp {
     open_coffer_image: Option<egui::TextureHandle>,
     show_settings: bool,
     confirm_delete_wallet: bool,
+    /// When `Some`, a Money-out that would leave the wallet below $0 is waiting
+    /// for a second submit of the same amount.
+    confirm_negative_cents: Option<i64>,
     undo: Option<RemovableEntry>,
     last_interaction: Instant,
     /// True while Argon2id / decrypt runs off the UI thread.
@@ -401,6 +404,7 @@ impl CofferlyApp {
             open_coffer_image,
             show_settings: false,
             confirm_delete_wallet: false,
+            confirm_negative_cents: None,
             undo: None,
             last_interaction: Instant::now(),
             unlocking: false,
@@ -463,6 +467,7 @@ impl CofferlyApp {
     fn select_wallet(&mut self, index: usize) {
         self.selected_wallet = index;
         self.confirm_delete_wallet = false;
+        self.confirm_negative_cents = None;
         self.undo = None;
         self.invalidate_ledger_cache();
     }
@@ -689,6 +694,7 @@ impl CofferlyApp {
         self.session = None;
         self.show_settings = false;
         self.confirm_delete_wallet = false;
+        self.confirm_negative_cents = None;
         self.clear_pin_digits();
         self.cleanup_temp_artifacts();
         self.set_status_info("Locked. Enter the parent PIN to make changes.");
@@ -1181,6 +1187,23 @@ impl CofferlyApp {
             EntryKind::Deduction => -amount,
         };
 
+        if self.draft.kind == EntryKind::Deduction {
+            let next_balance = self
+                .selected_wallet()
+                .current_balance_cents()
+                .saturating_sub(amount);
+            if next_balance < 0 && self.confirm_negative_cents != Some(amount) {
+                self.confirm_negative_cents = Some(amount);
+                self.set_status_info(format!(
+                    "This spending would leave {} at {}. Submit again to confirm.",
+                    self.selected_wallet().child_name,
+                    format_money(next_balance),
+                ));
+                return;
+            }
+        }
+        self.confirm_negative_cents = None;
+
         let wallet_name = self.selected_wallet().child_name.clone();
 
         self.selected_wallet_mut().entries.push(Entry {
@@ -1207,6 +1230,12 @@ impl CofferlyApp {
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
         self.invalidate_ledger_cache();
         self.save_with_success(status);
+    }
+
+    fn cancel_negative_spend_confirm(&mut self) {
+        if self.confirm_negative_cents.take().is_some() {
+            self.set_status_info("Spending not recorded.");
+        }
     }
 
     fn prefill_settings_from_selected(&mut self) {
@@ -2081,6 +2110,7 @@ mod app_tests {
             open_coffer_image: None,
             show_settings: false,
             confirm_delete_wallet: false,
+            confirm_negative_cents: None,
             undo: None,
             last_interaction: Instant::now(),
             unlocking: false,
@@ -3152,6 +3182,95 @@ mod app_tests {
         assert_eq!(app.status.text, "Enter a date like 08/21/2026.");
         assert_eq!(app.status.severity, StatusSeverity::Error);
         assert!(app.selected_wallet().entries.is_empty());
+    }
+
+    #[test]
+    fn money_out_that_would_go_negative_asks_confirm_before_commit() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+
+        app.add_entry();
+
+        assert!(app.selected_wallet().entries.is_empty());
+        assert_eq!(app.confirm_negative_cents, Some(500));
+        assert!(app.status.text.contains("would leave Child 1 at -$5.00"));
+        assert_eq!(app.status.severity, StatusSeverity::Info);
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+        assert_eq!(app.selected_wallet().entries[0].amount_cents, -500);
+        assert_eq!(app.selected_wallet().current_balance_cents(), -500);
+        assert!(app.confirm_negative_cents.is_none());
+        assert!(app.status.text.contains("Deducted $5.00"));
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+    }
+
+    #[test]
+    fn changing_the_money_out_amount_requires_a_fresh_negative_confirm() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+        assert_eq!(app.confirm_negative_cents, Some(500));
+
+        app.draft.amount = "8".to_owned();
+        app.add_entry();
+
+        assert!(app.selected_wallet().entries.is_empty());
+        assert_eq!(app.confirm_negative_cents, Some(800));
+        assert!(app.status.text.contains("would leave Child 1 at -$8.00"));
+    }
+
+    #[test]
+    fn deposits_do_not_require_a_negative_balance_confirm() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "10".to_owned();
+        app.confirm_negative_cents = Some(1000);
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+        assert_eq!(app.selected_wallet().entries[0].amount_cents, 1000);
+        assert!(app.confirm_negative_cents.is_none());
+        assert!(app.status.text.contains("Added $10.00"));
+    }
+
+    #[test]
+    fn money_out_that_stays_non_negative_commits_without_confirm() {
+        let (mut app, _dir) = test_app();
+        app.data.wallets[0].starting_balance_cents = 1_000;
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "10".to_owned();
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+        assert_eq!(app.selected_wallet().current_balance_cents(), 0);
+        assert!(app.confirm_negative_cents.is_none());
+        assert!(app.status.text.contains("Deducted $10.00"));
+    }
+
+    #[test]
+    fn canceling_a_negative_spend_confirm_does_not_record_the_entry() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+        assert_eq!(app.confirm_negative_cents, Some(500));
+
+        app.cancel_negative_spend_confirm();
+
+        assert!(app.confirm_negative_cents.is_none());
+        assert!(app.selected_wallet().entries.is_empty());
+        assert_eq!(app.status.text, "Spending not recorded.");
     }
 
     #[test]
