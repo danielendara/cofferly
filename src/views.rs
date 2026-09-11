@@ -1044,9 +1044,22 @@ impl CofferlyApp {
                         || amount_response.has_focus()
                         || date_response.has_focus());
 
-                let action = match self.draft.kind {
-                    crate::data::EntryKind::Deposit => "Add money",
-                    crate::data::EntryKind::Deduction => "Record spending",
+                let awaiting_negative_confirm = self.confirm_negative_cents.is_some()
+                    && matches!(self.draft.kind, crate::data::EntryKind::Deduction);
+                if awaiting_negative_confirm {
+                    ui.label(
+                        egui::RichText::new(&self.status.text)
+                            .size(11.0)
+                            .color(theme::NEGATIVE),
+                    );
+                }
+                let action = if awaiting_negative_confirm {
+                    "Record spending anyway"
+                } else {
+                    match self.draft.kind {
+                        crate::data::EntryKind::Deposit => "Add money",
+                        crate::data::EntryKind::Deduction => "Record spending",
+                    }
                 };
                 let clicked = ui
                     .add_sized(
@@ -1060,7 +1073,13 @@ impl CofferlyApp {
                     )
                     .clicked();
 
-                if clicked || enter_submit {
+                if awaiting_negative_confirm
+                    && ui
+                        .add_sized([ui.available_width(), 32.0], egui::Button::new("Cancel"))
+                        .clicked()
+                {
+                    self.cancel_negative_spend_confirm();
+                } else if clicked || enter_submit {
                     self.add_entry();
                 }
             });

@@ -6,6 +6,7 @@
 
 - Print and Export report success in the status chip, and opener failures tell the parent the file was saved and how to open it from the file manager.
 - With focus in the sidebar or main ledger, ↑/↓ or `[`/`]` switch wallets and announce the child's name and balance.
+- Money-out that would leave a wallet below $0 asks for a second confirm (or Cancel) before it is recorded. Deposits are unchanged.
 
 ## 0.3.0 — 2026-09-09
 
