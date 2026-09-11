@@ -1234,18 +1234,20 @@ impl CofferlyApp {
                         ui.label(desc);
                     });
                     row.col(|ui| {
-                        let amount_prefix = if ledger_row.amount_cents > 0 && !is_start {
-                            "+"
-                        } else {
-                            ""
-                        };
-                        let amt = egui::RichText::new(format!(
-                            "{amount_prefix}{}",
-                            format_money(ledger_row.amount_cents)
-                        ))
-                        .size(if is_start { 10.0 } else { 11.0 })
-                        .color(amount_color(ledger_row.amount_cents));
-                        ui.label(amt);
+                        let amount_text =
+                            format_ledger_amount_cell(ledger_row.amount_cents, is_start);
+                        let accessible =
+                            ledger_amount_accessible_name(ledger_row.amount_cents, is_start);
+                        let amt = egui::RichText::new(amount_text)
+                            .size(if is_start { 10.0 } else { 11.0 })
+                            .color(amount_color(ledger_row.amount_cents));
+                        ui.label(amt).widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                true,
+                                accessible.clone(),
+                            )
+                        });
                     });
                     row.col(|ui| {
                         ui.label(
@@ -1276,6 +1278,29 @@ fn draw_story_icon(ui: &egui::Ui, texture: &egui::TextureHandle, rect: egui::Rec
         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+fn format_ledger_amount_cell(amount_cents: i64, is_start: bool) -> String {
+    let money = format_money(amount_cents);
+    if is_start || amount_cents <= 0 {
+        money
+    } else {
+        format!("+{money}")
+    }
+}
+
+fn ledger_amount_accessible_name(amount_cents: i64, is_start: bool) -> String {
+    let money = format_money(amount_cents);
+    if is_start {
+        format!("Starting balance {money}")
+    } else if amount_cents > 0 {
+        format!("Money in {money}")
+    } else if amount_cents < 0 {
+        let unsigned = money.trim_start_matches('-');
+        format!("Money out {unsigned}")
+    } else {
+        money
+    }
 }
 
 fn settings_modal_width(viewport_width: f32) -> f32 {
@@ -1406,5 +1431,34 @@ mod settings_layout_tests {
     #[test]
     fn settings_content_scroll_height_expands_for_documentation_captures() {
         assert_eq!(settings_scroll_height(1200.0, true), 990.0);
+    }
+}
+
+#[cfg(test)]
+mod ledger_amount_a11y_tests {
+    use super::*;
+
+    #[test]
+    fn ledger_amount_cell_uses_a_sign_not_color_alone() {
+        assert_eq!(format_ledger_amount_cell(500, false), "+$5.00");
+        assert_eq!(format_ledger_amount_cell(-500, false), "-$5.00");
+        assert_eq!(format_ledger_amount_cell(0, false), "$0.00");
+        assert_eq!(format_ledger_amount_cell(1_000, true), "$10.00");
+        assert!(format_ledger_amount_cell(500, false).starts_with('+'));
+        assert!(format_ledger_amount_cell(-500, false).starts_with('-'));
+    }
+
+    #[test]
+    fn ledger_amount_accessible_name_says_in_or_out() {
+        assert_eq!(ledger_amount_accessible_name(500, false), "Money in $5.00");
+        assert_eq!(
+            ledger_amount_accessible_name(-500, false),
+            "Money out $5.00"
+        );
+        assert_eq!(
+            ledger_amount_accessible_name(1_000, true),
+            "Starting balance $10.00"
+        );
+        assert!(!ledger_amount_accessible_name(-500, false).contains("-$"));
     }
 }
