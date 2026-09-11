@@ -5,6 +5,7 @@
 ### UX
 
 - Print and Export report success in the status chip, and opener failures tell the parent the file was saved and how to open it from the file manager.
+- With focus in the sidebar or main ledger, ↑/↓ or `[`/`]` switch wallets and announce the child's name and balance.
 
 ## 0.3.0 — 2026-09-09
 
