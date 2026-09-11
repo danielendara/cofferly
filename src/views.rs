@@ -983,18 +983,22 @@ impl CofferlyApp {
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
+                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let mut kind_has_focus = false;
                 ui.scope(|ui| {
                     ui.spacing_mut().button_padding.x = 4.0;
                     ui.columns(2, |columns| {
-                        columns[0].selectable_value(
-                            &mut self.draft.kind,
+                        kind_has_focus |= paint_money_kind_button(
+                            &mut columns[0],
                             crate::data::EntryKind::Deposit,
-                            egui::RichText::new("Money in").size(13.0),
-                        );
-                        columns[1].selectable_value(
                             &mut self.draft.kind,
+                            enter_pressed,
+                        );
+                        kind_has_focus |= paint_money_kind_button(
+                            &mut columns[1],
                             crate::data::EntryKind::Deduction,
-                            egui::RichText::new("Money out").size(13.0),
+                            &mut self.draft.kind,
+                            enter_pressed,
                         );
                     });
                 });
@@ -1078,13 +1082,14 @@ impl CofferlyApp {
                     })
                     .inner;
 
-                let enter_submit = ui.input(|i| i.key_pressed(egui::Key::Enter))
+                let enter_submit = enter_pressed
                     && (desc_response.lost_focus()
                         || amount_response.lost_focus()
                         || date_response.lost_focus()
                         || desc_response.has_focus()
                         || amount_response.has_focus()
-                        || date_response.has_focus());
+                        || date_response.has_focus()
+                        || kind_has_focus);
 
                 let awaiting_negative_confirm = self.confirm_negative_cents.is_some()
                     && matches!(self.draft.kind, crate::data::EntryKind::Deduction);
@@ -1303,6 +1308,86 @@ fn ledger_amount_accessible_name(amount_cents: i64, is_start: bool) -> String {
     }
 }
 
+fn money_kind_label(kind: crate::data::EntryKind) -> &'static str {
+    match kind {
+        crate::data::EntryKind::Deposit => "Money in",
+        crate::data::EntryKind::Deduction => "Money out",
+    }
+}
+
+fn money_kind_access_name(kind: crate::data::EntryKind, selected: bool) -> String {
+    let label = money_kind_label(kind);
+    if selected {
+        format!("{label}, selected")
+    } else {
+        label.to_owned()
+    }
+}
+
+fn money_kind_visuals(selected: bool) -> (egui::Color32, egui::Stroke, egui::Color32) {
+    if selected {
+        (
+            theme::ACCENT,
+            egui::Stroke::new(2.0, theme::ACCENT_DARK),
+            egui::Color32::WHITE,
+        )
+    } else {
+        (
+            theme::CARD_BG,
+            egui::Stroke::new(1.0, theme::BORDER),
+            theme::TEXT_PRIMARY,
+        )
+    }
+}
+
+fn paint_money_kind_button(
+    ui: &mut egui::Ui,
+    kind: crate::data::EntryKind,
+    current: &mut crate::data::EntryKind,
+    enter_pressed: bool,
+) -> bool {
+    let selected = *current == kind;
+    let (fill, stroke, text_color) = money_kind_visuals(selected);
+    let label = money_kind_label(kind);
+    let access = money_kind_access_name(kind, selected);
+    let response = ui.add_sized(
+        [ui.available_width(), 32.0],
+        egui::Button::selectable(
+            selected,
+            egui::RichText::new(label)
+                .size(13.0)
+                .strong()
+                .color(text_color),
+        )
+        .fill(fill)
+        .stroke(stroke),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::RadioButton,
+            true,
+            selected,
+            access.clone(),
+        )
+    });
+    if response.clicked() {
+        *current = apply_money_kind_click(*current, kind, enter_pressed);
+    }
+    response.has_focus()
+}
+
+fn apply_money_kind_click(
+    current: crate::data::EntryKind,
+    clicked: crate::data::EntryKind,
+    enter_pressed: bool,
+) -> crate::data::EntryKind {
+    if enter_pressed {
+        current
+    } else {
+        clicked
+    }
+}
+
 fn settings_modal_width(viewport_width: f32) -> f32 {
     (viewport_width - 48.0).clamp(360.0, 640.0)
 }
@@ -1460,5 +1545,52 @@ mod ledger_amount_a11y_tests {
             "Starting balance $10.00"
         );
         assert!(!ledger_amount_accessible_name(-500, false).contains("-$"));
+    }
+}
+
+#[cfg(test)]
+mod entry_form_money_kind_tests {
+    use super::*;
+    use crate::data::EntryKind;
+
+    #[test]
+    fn selected_money_kind_has_a_stronger_visual_than_unselected() {
+        let (selected_fill, selected_stroke, selected_text) = money_kind_visuals(true);
+        let (idle_fill, idle_stroke, idle_text) = money_kind_visuals(false);
+
+        assert_eq!(selected_fill, theme::ACCENT);
+        assert_eq!(idle_fill, theme::CARD_BG);
+        assert!(selected_stroke.width > idle_stroke.width);
+        assert_eq!(selected_text, egui::Color32::WHITE);
+        assert_eq!(idle_text, theme::TEXT_PRIMARY);
+        assert_ne!(selected_fill, idle_fill);
+    }
+
+    #[test]
+    fn money_kind_accesskit_name_marks_the_selected_value() {
+        assert_eq!(
+            money_kind_access_name(EntryKind::Deposit, true),
+            "Money in, selected"
+        );
+        assert_eq!(
+            money_kind_access_name(EntryKind::Deduction, false),
+            "Money out"
+        );
+        assert_eq!(
+            money_kind_access_name(EntryKind::Deduction, true),
+            "Money out, selected"
+        );
+    }
+
+    #[test]
+    fn enter_does_not_change_money_kind_so_the_form_can_still_submit() {
+        assert_eq!(
+            apply_money_kind_click(EntryKind::Deduction, EntryKind::Deposit, true),
+            EntryKind::Deduction
+        );
+        assert_eq!(
+            apply_money_kind_click(EntryKind::Deduction, EntryKind::Deposit, false),
+            EntryKind::Deposit
+        );
     }
 }

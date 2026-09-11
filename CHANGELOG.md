@@ -17,6 +17,7 @@
 ### Accessibility
 
 - Ledger amounts keep their sign in the cell and expose Money in / Money out in the AccessKit name so polarity is not color-only.
+- Entry-form Money in/out uses a stronger selected fill and stroke, and AccessKit names include “selected”. Enter still submits the transaction.
 
 ## 0.3.0 — 2026-09-09
 
