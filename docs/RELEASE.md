@@ -16,7 +16,7 @@ The portable zip will be created in `dist/`.
 
 ## README screenshots
 
-Refresh the three README images after meaningful UI changes (requires a graphical desktop):
+Refresh README / recovery-card images after meaningful UI changes (requires a graphical desktop):
 
 ```bash
 cargo build --release
@@ -28,6 +28,7 @@ This runs Cofferly with `COFFERLY_CAPTURE` / `COFFERLY_DATA_DIR` (isolated vault
 - `docs/screenshots/cofferly-story-unlock.png`
 - `docs/screenshots/cofferly-wallet-screen.png`
 - `docs/screenshots/cofferly-settings-screen.png`
+- `docs/screenshots/cofferly-story-setup.png` (`COFFERLY_CAPTURE=story-setup` or `recovery-card`)
 
 
 ## Windows Installer
