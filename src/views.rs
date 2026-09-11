@@ -1029,12 +1029,28 @@ impl CofferlyApp {
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
-                let date_response = ui.add_sized(
-                    [ui.available_width(), 32.0],
-                    egui::TextEdit::singleline(&mut self.draft.date_input)
-                        .id(crate::entry_field_id(EntryFormField::Date))
-                        .hint_text("MM/DD/YYYY"),
-                );
+                let date_response = ui
+                    .horizontal(|ui| {
+                        let today_width = 72.0;
+                        let date_width =
+                            (ui.available_width() - today_width - ui.spacing().item_spacing.x)
+                                .max(80.0);
+                        let response = ui.add_sized(
+                            [date_width, 32.0],
+                            egui::TextEdit::singleline(&mut self.draft.date_input)
+                                .id(crate::entry_field_id(EntryFormField::Date))
+                                .hint_text("MM/DD/YYYY or YYYY-MM-DD"),
+                        );
+                        if ui
+                            .add_sized([today_width, 32.0], egui::Button::new("Today"))
+                            .on_hover_text("Fill today's local date")
+                            .clicked()
+                        {
+                            self.fill_entry_date_today();
+                        }
+                        response
+                    })
+                    .inner;
 
                 let enter_submit = ui.input(|i| i.key_pressed(egui::Key::Enter))
                     && (desc_response.lost_focus()

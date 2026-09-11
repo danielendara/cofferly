@@ -67,7 +67,9 @@ pub fn parse_ledger_date(input: &str) -> Result<NaiveDate, String> {
     let trimmed = input.trim();
     NaiveDate::parse_from_str(trimmed, "%m/%d/%Y")
         .or_else(|_| NaiveDate::parse_from_str(trimmed, "%Y-%m-%d"))
-        .map_err(|_| "Enter a date like 08/21/2026.".to_owned())
+        .map_err(|_| {
+            "Enter a date as MM/DD/YYYY (08/21/2026) or ISO %Y-%m-%d (2026-08-21).".to_owned()
+        })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -309,7 +311,10 @@ mod tests {
             parse_ledger_date("2026-07-11").unwrap(),
             NaiveDate::from_ymd_opt(2026, 7, 11).unwrap()
         );
-        assert!(parse_ledger_date("not a date").is_err());
+        assert_eq!(
+            parse_ledger_date("not a date").unwrap_err(),
+            "Enter a date as MM/DD/YYYY (08/21/2026) or ISO %Y-%m-%d (2026-08-21)."
+        );
     }
 
     #[test]

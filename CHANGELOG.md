@@ -7,6 +7,7 @@
 - Print and Export report success in the status chip, and opener failures tell the parent the file was saved and how to open it from the file manager.
 - With focus in the sidebar or main ledger, ↑/↓ or `[`/`]` switch wallets and announce the child's name and balance.
 - Money-out that would leave a wallet below $0 asks for a second confirm (or Cancel) before it is recorded. Deposits are unchanged.
+- Entry form **Today** fills the local date. Date errors mention both MM/DD/YYYY and ISO `%Y-%m-%d`, and focus still moves to Date on failure.
 
 ## 0.3.0 — 2026-09-09
 
