@@ -3179,6 +3179,15 @@ mod app_tests {
         assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
         assert_eq!(app.status.text, "Add a description (1-100 characters).");
 
+        app.draft.description = "a".repeat(data::MAX_DESCRIPTION_CHARS + 1);
+        app.draft.amount = "5".to_owned();
+        app.draft.date_input = format_ledger_date(Local::now().date_naive());
+        app.add_entry();
+
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
+        assert_eq!(app.status.text, "Add a description (1-100 characters).");
+        assert!(app.selected_wallet().entries.is_empty());
+
         app.draft.description = "Allowance".to_owned();
         app.draft.date_input = "not a date".to_owned();
         app.add_entry();

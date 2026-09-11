@@ -259,6 +259,22 @@ pub fn valid_description(desc: &str) -> bool {
     !trimmed.is_empty() && trimmed.chars().count() <= MAX_DESCRIPTION_CHARS
 }
 
+pub fn description_char_count(desc: &str) -> usize {
+    desc.chars().count()
+}
+
+pub fn description_length_label(desc: &str) -> String {
+    format!("{}/{}", description_char_count(desc), MAX_DESCRIPTION_CHARS)
+}
+
+pub fn description_length_accessible_name(desc: &str) -> String {
+    format!(
+        "What was it for? {} of {} characters",
+        description_char_count(desc),
+        MAX_DESCRIPTION_CHARS
+    )
+}
+
 fn clamp_cents(cents: i64) -> i64 {
     cents.clamp(-MAX_ABSOLUTE_CENTS, MAX_ABSOLUTE_CENTS)
 }
@@ -283,6 +299,16 @@ mod tests {
         assert!(!valid_description("   "));
         assert!(valid_description(&"a".repeat(MAX_DESCRIPTION_CHARS)));
         assert!(!valid_description(&"a".repeat(MAX_DESCRIPTION_CHARS + 1)));
+        assert_eq!(description_length_label(""), "0/100");
+        assert_eq!(description_length_label("Allowance"), "9/100");
+        assert_eq!(
+            description_length_label(&"a".repeat(MAX_DESCRIPTION_CHARS)),
+            "100/100"
+        );
+        assert_eq!(
+            description_length_accessible_name("Snack"),
+            "What was it for? 5 of 100 characters"
+        );
 
         assert!(valid_cents(MAX_ABSOLUTE_CENTS));
         assert!(valid_cents(-MAX_ABSOLUTE_CENTS));
