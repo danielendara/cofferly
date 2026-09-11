@@ -8,6 +8,7 @@
 - With focus in the sidebar or main ledger, ↑/↓ or `[`/`]` switch wallets and announce the child's name and balance.
 - Money-out that would leave a wallet below $0 asks for a second confirm (or Cancel) before it is recorded. Deposits are unchanged.
 - Entry form **Today** fills the local date. Date errors mention both MM/DD/YYYY and ISO `%Y-%m-%d`, and focus still moves to Date on failure.
+- Entry description shows a live `N/100` remaining count (and an AccessKit name) while submit still enforces the 100-character maximum.
 
 ## 0.3.0 — 2026-09-09
 

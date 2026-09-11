@@ -7,7 +7,10 @@
 
 use eframe::egui;
 
-use crate::data::{valid_child_name, LedgerRowDate, LedgerSort};
+use crate::data::{
+    description_length_accessible_name, description_length_label, valid_child_name, LedgerRowDate,
+    LedgerSort,
+};
 use crate::money::format_money;
 use crate::money::format_money_input;
 use crate::theme;
@@ -996,19 +999,42 @@ impl CofferlyApp {
                     });
                 });
 
-                ui.label(
-                    egui::RichText::new("What was it for?")
-                        .size(11.0)
-                        .strong()
-                        .color(theme::TEXT_PRIMARY),
-                );
-                let desc_response = ui.add_sized(
-                    [ui.available_width(), 32.0],
-                    egui::TextEdit::singleline(&mut self.draft.description)
-                        .id(crate::entry_field_id(EntryFormField::Description))
-                        .char_limit(100)
-                        .hint_text("e.g. Weekly allowance"),
-                );
+                let desc_label = ui
+                    .horizontal(|ui| {
+                        let label = ui.label(
+                            egui::RichText::new("What was it for?")
+                                .size(11.0)
+                                .strong()
+                                .color(theme::TEXT_PRIMARY),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(description_length_label(
+                                    &self.draft.description,
+                                ))
+                                .size(11.0)
+                                .color(theme::TEXT_SECONDARY),
+                            );
+                        });
+                        label
+                    })
+                    .inner;
+                let desc_response = ui
+                    .add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::TextEdit::singleline(&mut self.draft.description)
+                            .id(crate::entry_field_id(EntryFormField::Description))
+                            .char_limit(100)
+                            .hint_text("e.g. Weekly allowance"),
+                    )
+                    .labelled_by(desc_label.id);
+                desc_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::TextEdit,
+                        true,
+                        description_length_accessible_name(&self.draft.description),
+                    )
+                });
 
                 ui.label(
                     egui::RichText::new("Amount")
