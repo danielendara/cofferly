@@ -14,6 +14,10 @@
 
 - `COFFERLY_CAPTURE=story-setup` (alias `recovery-card`) writes `cofferly-story-setup.png`. `scripts/capture-screenshots.sh` still runs one target per process.
 
+### Accessibility
+
+- Ledger amounts keep their sign in the cell and expose Money in / Money out in the AccessKit name so polarity is not color-only.
+
 ## 0.3.0 — 2026-09-09
 
 CSV export, backdated entries, grouped money, and Coffer Story / Settings hardening after the 0.2.0 cut.
