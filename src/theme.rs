@@ -22,6 +22,42 @@ pub const CARD_BG: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_rgb(216, 222, 220);
 pub const FAINT_BG: Color32 = Color32::from_rgb(246, 248, 247);
 pub const APP_BG: Color32 = Color32::from_rgb(250, 248, 244);
+/// Left wallet picker width; cards stay 50px tall so 1280×800 still fits.
+pub const WALLET_PICKER_WIDTH: f32 = 300.0;
+pub const WALLET_CARD_HEIGHT: f32 = 50.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WalletCardChrome {
+    pub fill: Color32,
+    pub stroke: Stroke,
+    pub focus_ring: Option<Stroke>,
+}
+
+/// Selected = inverted fill + thicker stroke. Focused = 3px ring that stays
+/// visible on both white cards and the teal selected fill (egui's white
+/// focus stroke vanishes on `CARD_BG`).
+pub fn wallet_card_chrome(selected: bool, focused: bool) -> WalletCardChrome {
+    let fill = if selected { ACCENT } else { CARD_BG };
+    let stroke = if selected {
+        Stroke::new(2.0, ACCENT_DARK)
+    } else {
+        Stroke::new(1.0, BORDER)
+    };
+    let focus_ring = if focused {
+        Some(if selected {
+            Stroke::new(3.0, Color32::WHITE)
+        } else {
+            Stroke::new(3.0, GOLD_DARK)
+        })
+    } else {
+        None
+    };
+    WalletCardChrome {
+        fill,
+        stroke,
+        focus_ring,
+    }
+}
 
 pub fn balance_color(cents: i64) -> Color32 {
     cents_color(cents)
@@ -172,5 +208,44 @@ mod tests {
         assert_eq!(style.visuals.widgets.hovered.weak_bg_fill, ACCENT_LIGHT);
         assert_eq!(style.visuals.widgets.active.weak_bg_fill, ACCENT);
         assert_eq!(style.visuals.selection.stroke.color, Color32::WHITE);
+    }
+
+    #[test]
+    fn selected_and_focused_wallet_cards_are_distinguishable() {
+        let selected = wallet_card_chrome(true, false);
+        let focused = wallet_card_chrome(false, true);
+        let both = wallet_card_chrome(true, true);
+        let idle = wallet_card_chrome(false, false);
+
+        assert_eq!(selected.fill, ACCENT);
+        assert_eq!(focused.fill, CARD_BG);
+        assert!(selected.focus_ring.is_none());
+        let focused_ring = focused.focus_ring.expect("focus has a ring");
+        let both_ring = both.focus_ring.expect("selected+focused has a ring");
+        assert_eq!(focused_ring.color, GOLD_DARK);
+        assert_eq!(both_ring.color, Color32::WHITE);
+        assert!(focused_ring.width > selected.stroke.width);
+        assert!(selected.stroke.width > idle.stroke.width);
+        assert_eq!(both.fill, selected.fill);
+        assert_ne!(focused_ring.color, both_ring.color);
+        assert!(contrast_ratio(GOLD_DARK, CARD_BG) >= 3.0);
+        assert!(contrast_ratio(Color32::WHITE, ACCENT) >= 3.0);
+    }
+
+    #[test]
+    fn wallet_card_metrics_fit_1280x800_sidebar() {
+        assert_eq!(WALLET_PICKER_WIDTH, 300.0);
+        assert_eq!(WALLET_CARD_HEIGHT, 50.0);
+        let viewport_height = 800.0;
+        let top_header = 56.0;
+        let sidebar_margin = 22.0;
+        let family_header = 48.0;
+        let print_export = 29.0 * 4.0;
+        let remaining =
+            viewport_height - top_header - sidebar_margin - family_header - print_export;
+        assert!(
+            remaining > WALLET_CARD_HEIGHT * 3.0,
+            "three 50px wallet cards must still fit a 1280×800 window"
+        );
     }
 }
