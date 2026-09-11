@@ -467,6 +467,31 @@ impl CofferlyApp {
         self.invalidate_ledger_cache();
     }
 
+    /// ↑/↓ or `[`/`]` move the selected wallet when focus is in the sidebar
+    /// or main ledger — not while a text field or Settings has the keyboard.
+    fn handle_wallet_keyboard_nav(&mut self, ctx: &egui::Context) {
+        if self.show_settings || ctx.text_edit_focused() {
+            return;
+        }
+        let Some(delta) = consume_wallet_keyboard_delta(ctx) else {
+            return;
+        };
+        self.apply_wallet_keyboard_delta(delta);
+    }
+
+    fn apply_wallet_keyboard_delta(&mut self, delta: isize) {
+        let next = next_wallet_index(self.selected_wallet, self.data.wallets.len(), delta);
+        if next == self.selected_wallet {
+            return;
+        }
+        self.select_wallet(next);
+        let announcement = {
+            let wallet = self.selected_wallet();
+            wallet_selection_announcement(&wallet.child_name, wallet.current_balance_cents())
+        };
+        self.set_status_info(announcement);
+    }
+
     /// Start PIN verification. Heavy Argon2id work runs on a background thread so
     /// the window stays responsive; results are applied in [`Self::poll_unlock`].
     fn start_unlock(&mut self) {
@@ -1562,6 +1587,8 @@ impl eframe::App for CofferlyApp {
             return;
         }
 
+        self.handle_wallet_keyboard_nav(&ctx);
+
         egui::Panel::top("header")
             .frame(
                 egui::Frame::new()
@@ -1667,7 +1694,7 @@ impl eframe::App for CofferlyApp {
                             let child_name = self.data.wallets[index].child_name.clone();
                             let balance = self.data.wallets[index].current_balance_cents();
                             let accessible_label =
-                                format!("{}, balance {}", child_name, format_money(balance));
+                                wallet_selection_announcement(&child_name, balance);
 
                             let response = ui.add_sized(
                                 [panel_content_width, 50.0],
@@ -1876,6 +1903,41 @@ pub(crate) fn pin_digit_id(index: usize) -> egui::Id {
 
 pub(crate) fn entry_field_id(field: EntryFormField) -> egui::Id {
     egui::Id::new(("entry_form_field", field))
+}
+
+fn wallet_keyboard_delta(key: egui::Key) -> Option<isize> {
+    match key {
+        egui::Key::ArrowDown | egui::Key::CloseBracket => Some(1),
+        egui::Key::ArrowUp | egui::Key::OpenBracket => Some(-1),
+        _ => None,
+    }
+}
+
+fn consume_wallet_keyboard_delta(ctx: &egui::Context) -> Option<isize> {
+    ctx.input_mut(|input| {
+        for key in [
+            egui::Key::ArrowDown,
+            egui::Key::CloseBracket,
+            egui::Key::ArrowUp,
+            egui::Key::OpenBracket,
+        ] {
+            if input.consume_key(egui::Modifiers::NONE, key) {
+                return wallet_keyboard_delta(key);
+            }
+        }
+        None
+    })
+}
+
+fn next_wallet_index(current: usize, count: usize, delta: isize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    (current as isize + delta).clamp(0, (count - 1) as isize) as usize
+}
+
+fn wallet_selection_announcement(name: &str, balance_cents: i64) -> String {
+    format!("{}, balance {}", name, format_money(balance_cents))
 }
 
 /// Free wrong attempts before the cooldown starts. Absorbs an honest misclick
@@ -2547,6 +2609,53 @@ mod app_tests {
         app.select_wallet(1);
 
         assert!(app.undo.is_none());
+    }
+
+    #[test]
+    fn wallet_keyboard_keys_move_to_the_next_and_previous_index() {
+        assert_eq!(wallet_keyboard_delta(egui::Key::ArrowDown), Some(1));
+        assert_eq!(wallet_keyboard_delta(egui::Key::CloseBracket), Some(1));
+        assert_eq!(wallet_keyboard_delta(egui::Key::ArrowUp), Some(-1));
+        assert_eq!(wallet_keyboard_delta(egui::Key::OpenBracket), Some(-1));
+        assert_eq!(wallet_keyboard_delta(egui::Key::Enter), None);
+        assert_eq!(next_wallet_index(0, 3, 1), 1);
+        assert_eq!(next_wallet_index(2, 3, 1), 2);
+        assert_eq!(next_wallet_index(0, 3, -1), 0);
+    }
+
+    #[test]
+    fn keyboard_wallet_switch_announces_name_and_balance_and_clears_undo() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "$10.50".to_owned();
+        app.add_entry();
+        app.remove_latest_entry();
+        assert!(app.undo.is_some());
+
+        app.apply_wallet_keyboard_delta(1);
+
+        assert_eq!(app.selected_wallet, 1);
+        assert!(app.undo.is_none());
+        assert_eq!(app.status.text, wallet_selection_announcement("Child 2", 0));
+        assert!(app.status.text.contains("Child 2"));
+        assert!(app.status.text.contains("balance"));
+    }
+
+    #[test]
+    fn keyboard_wallet_switch_at_the_edge_does_not_clear_undo() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "$10.50".to_owned();
+        app.add_entry();
+        app.remove_latest_entry();
+        assert!(app.undo.is_some());
+
+        app.apply_wallet_keyboard_delta(-1);
+
+        assert_eq!(app.selected_wallet, 0);
+        assert!(app.undo.is_some());
     }
 
     /// Minimal in-memory `eframe::Storage` so `CofferlyApp::new` can restore
