@@ -46,7 +46,10 @@ use io::{
 };
 use money::{format_money, format_money_input, parse_dollars_to_cents};
 use print_html::{ledger_file_stem, write_printable_ledger};
-use theme::{app_icon, balance_color, configure_style};
+use theme::{
+    app_icon, balance_color, configure_style, wallet_card_chrome, WALLET_CARD_HEIGHT,
+    WALLET_PICKER_WIDTH,
+};
 
 fn main() -> eframe::Result<()> {
     let capturing = std::env::var_os("COFFERLY_CAPTURE").is_some();
@@ -1696,8 +1699,8 @@ impl eframe::App for CofferlyApp {
 
         egui::Panel::left("wallet_picker")
             .resizable(false)
-            .min_size(300.0)
-            .max_size(300.0)
+            .min_size(WALLET_PICKER_WIDTH)
+            .max_size(WALLET_PICKER_WIDTH)
             .frame(
                 egui::Frame::new()
                     .fill(theme::FAINT_BG)
@@ -1730,20 +1733,22 @@ impl eframe::App for CofferlyApp {
                             let accessible_label =
                                 wallet_selection_announcement(&child_name, balance);
 
+                            let idle_chrome = wallet_card_chrome(selected, false);
                             let response = ui.add_sized(
-                                [panel_content_width, 50.0],
+                                [panel_content_width, WALLET_CARD_HEIGHT],
                                 egui::Button::selectable(selected, "")
-                                    .fill(if selected {
-                                        theme::ACCENT
-                                    } else {
-                                        theme::CARD_BG
-                                    })
-                                    .stroke(if selected {
-                                        egui::Stroke::new(1.0, theme::ACCENT)
-                                    } else {
-                                        egui::Stroke::new(1.0, theme::BORDER)
-                                    }),
+                                    .fill(idle_chrome.fill)
+                                    .stroke(idle_chrome.stroke),
                             );
+                            let chrome = wallet_card_chrome(selected, response.has_focus());
+                            if let Some(ring) = chrome.focus_ring {
+                                ui.painter_at(response.rect).rect_stroke(
+                                    response.rect,
+                                    egui::CornerRadius::same(8),
+                                    ring,
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
 
                             response.widget_info(|| {
                                 egui::WidgetInfo::selected(
