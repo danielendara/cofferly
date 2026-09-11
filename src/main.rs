@@ -2157,6 +2157,22 @@ mod app_tests {
     }
 
     #[test]
+    fn capture_story_setup_prepares_the_recovery_card_reveal_screen() {
+        let (mut app, _dir) = test_app();
+        app.parent_unlocked = true;
+        app.lock_mode = LockMode::Story;
+        app.pending_story = None;
+
+        capture::prepare_target(&mut app, capture::CaptureTarget::StorySetup);
+
+        assert!(!app.parent_unlocked);
+        assert_eq!(app.lock_mode, LockMode::SetupReveal);
+        assert!(app.pending_story.is_some());
+        assert!(!app.show_settings);
+        assert!(app.status.text.contains("recovery key"));
+    }
+
+    #[test]
     fn confirmed_first_run_story_is_saved_immediately_without_serializing_the_story() {
         let (mut app, _dir) = test_app();
         let selected = test_story();

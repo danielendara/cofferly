@@ -10,6 +10,10 @@
 - Entry form **Today** fills the local date. Date errors mention both MM/DD/YYYY and ISO `%Y-%m-%d`, and focus still moves to Date on failure.
 - Entry description shows a live `N/100` remaining count (and an AccessKit name) while submit still enforces the 100-character maximum.
 
+### Docs
+
+- `COFFERLY_CAPTURE=story-setup` (alias `recovery-card`) writes `cofferly-story-setup.png`. `scripts/capture-screenshots.sh` still runs one target per process.
+
 ## 0.3.0 — 2026-09-09
 
 CSV export, backdated entries, grouped money, and Coffer Story / Settings hardening after the 0.2.0 cut.

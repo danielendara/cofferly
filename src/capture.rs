@@ -1,10 +1,12 @@
 //! Maintainer screenshot capture for README / docs.
 //!
 //! ```text
-//! COFFERLY_CAPTURE=story-unlock,wallet,settings \
+//! COFFERLY_CAPTURE=story-unlock,wallet,settings,story-setup \
 //! COFFERLY_CAPTURE_DIR=docs/screenshots \
 //! COFFERLY_DATA_DIR=/tmp/cofferly-capture \
 //! cargo run --release
+//!
+//! `recovery-card` is an alias for `story-setup`. Run one target per process.
 //! ```
 //!
 //! Do not set these in normal family use.
@@ -26,10 +28,11 @@ use crate::{CofferlyApp, LockMode, Status};
 const DEMO_STORY: [&str; STORY_LENGTH] = ["apple", "lantern", "diamond", "leaf", "fox", "flower"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CaptureTarget {
+pub(crate) enum CaptureTarget {
     StoryUnlock,
     Wallet,
     Settings,
+    StorySetup,
 }
 
 impl CaptureTarget {
@@ -38,6 +41,7 @@ impl CaptureTarget {
             "story-unlock" | "story" | "unlock" => Some(Self::StoryUnlock),
             "wallet" | "ledger" => Some(Self::Wallet),
             "settings" => Some(Self::Settings),
+            "story-setup" | "recovery-card" | "setup" => Some(Self::StorySetup),
             _ => None,
         }
     }
@@ -47,6 +51,7 @@ impl CaptureTarget {
             Self::StoryUnlock => "cofferly-story-unlock.png",
             Self::Wallet => "cofferly-wallet-screen.png",
             Self::Settings => "cofferly-settings-screen.png",
+            Self::StorySetup => "cofferly-story-setup.png",
         }
     }
 }
@@ -73,7 +78,7 @@ impl CaptureSession {
                 queue.push_back(target);
             } else if !part.trim().is_empty() {
                 eprintln!(
-                    "COFFERLY_CAPTURE: unknown target '{part}' (use story-unlock,wallet,settings)"
+                    "COFFERLY_CAPTURE: unknown target '{part}' (use story-unlock,wallet,settings,story-setup)"
                 );
             }
         }
@@ -155,11 +160,12 @@ impl CaptureSession {
     }
 }
 
-fn prepare_target(app: &mut CofferlyApp, target: CaptureTarget) {
+pub(crate) fn prepare_target(app: &mut CofferlyApp, target: CaptureTarget) {
     match target {
         CaptureTarget::StoryUnlock => prepare_story_unlock(app),
         CaptureTarget::Wallet => prepare_wallet(app, false),
         CaptureTarget::Settings => prepare_wallet(app, true),
+        CaptureTarget::StorySetup => prepare_story_setup(app),
     }
     app.ledger_cache = None;
     app.last_interaction = std::time::Instant::now();
@@ -239,6 +245,29 @@ fn persist_demo(app: &mut CofferlyApp, data: &AppData) -> SessionCrypto {
     session_slot.expect("session established during encrypt")
 }
 
+fn prepare_story_setup(app: &mut CofferlyApp) {
+    let data = demo_app_data();
+    let _session = persist_demo(app, &data);
+
+    app.data = data;
+    app.session = None;
+    app.parent_unlocked = false;
+    app.save_enabled = true;
+    app.lock_mode = LockMode::SetupReveal;
+    app.pending_story = Some(DEMO_STORY);
+    app.story_selections.clear();
+    app.display_order = stable_display_order();
+    app.show_settings = false;
+    app.status =
+        Status::info("Write or print this recovery key and store it away from the computer.");
+    app.selected_wallet = 1;
+    app.child_name_input = "Child 2".to_owned();
+    app.starting_balance_input = format_money_input(1_500);
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description.clear();
+    app.draft.amount.clear();
+}
+
 fn prepare_story_unlock(app: &mut CofferlyApp) {
     let data = demo_app_data();
     let _session = persist_demo(app, &data);
@@ -300,4 +329,41 @@ fn save_color_image(image: &Arc<ColorImage>, path: &Path) -> Result<(), String> 
         .ok_or_else(|| "invalid screenshot buffer".to_owned())?
         .save(path)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_card_and_story_setup_write_the_same_png_name() {
+        assert_eq!(
+            CaptureTarget::parse("recovery-card"),
+            Some(CaptureTarget::StorySetup)
+        );
+        assert_eq!(
+            CaptureTarget::parse("story-setup"),
+            Some(CaptureTarget::StorySetup)
+        );
+        assert_eq!(
+            CaptureTarget::StorySetup.file_name(),
+            "cofferly-story-setup.png"
+        );
+        assert_eq!(
+            CaptureTarget::parse("story-unlock"),
+            Some(CaptureTarget::StoryUnlock)
+        );
+        assert!(CaptureTarget::parse("not-a-screen").is_none());
+    }
+
+    #[test]
+    fn capture_script_lists_story_setup_and_keeps_one_target_per_process() {
+        let script = include_str!("../scripts/capture-screenshots.sh");
+        assert!(script.contains("story-setup"));
+        assert!(script.contains("cofferly-story-setup.png"));
+        assert!(script.contains("One target per process"));
+        assert!(script
+            .lines()
+            .any(|line| line.contains("for target in") && line.contains("story-setup")));
+    }
 }
