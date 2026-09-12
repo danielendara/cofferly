@@ -145,6 +145,14 @@ impl Status {
 struct UiState {
     selected_wallet: usize,
     ledger_sort_newest_first: bool,
+    /// The selected wallet's `child_name` at last save, used to restore the
+    /// same wallet by identity (not position) after unlock -- an index alone
+    /// would point at the wrong wallet if one was deleted, or a wrong-but-
+    /// in-bounds one if the roster reordered. `#[serde(default)]` so state
+    /// persisted by older builds (no such field) still deserializes; those
+    /// fall back to the plain index-based restore they always had.
+    #[serde(default)]
+    selected_wallet_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +227,11 @@ pub(crate) struct CofferlyApp {
     /// Paths of temp exports/recovery cards written this session, so they can
     /// be deleted on lock/exit instead of lingering until the next launch.
     temp_artifact_paths: Vec<PathBuf>,
+    /// The wallet name persisted from a previous run, awaiting resolution
+    /// against the real wallet list once a vault unlock succeeds (the vault
+    /// is still encrypted at construction time, so it can't be resolved to
+    /// an index yet). Consumed (set to `None`) by the first `apply_unlock`.
+    pending_wallet_selection_name: Option<String>,
 }
 
 enum BackgroundCryptoResult {
@@ -372,7 +385,8 @@ impl CofferlyApp {
         } else {
             data.wallets.len()
         };
-        let (selected_wallet, ledger_sort) = restore_ui_state(cc, restore_wallet_bound);
+        let (selected_wallet, ledger_sort, pending_wallet_selection_name) =
+            restore_ui_state(cc, restore_wallet_bound);
         let (lock_screen_image, lock_screen_bg) = load_lock_screen_image(&cc.egui_ctx);
         let open_coffer_image = load_open_coffer_image(&cc.egui_ctx);
         let story_icon_textures = load_story_icon_textures(&cc.egui_ctx);
@@ -417,6 +431,7 @@ impl CofferlyApp {
             capture: capture::CaptureSession::from_env(),
             capturing: std::env::var_os("COFFERLY_CAPTURE").is_some(),
             temp_artifact_paths: Vec::new(),
+            pending_wallet_selection_name,
         }
     }
 
@@ -615,10 +630,27 @@ impl CofferlyApp {
     }
 
     fn apply_unlock(&mut self, data: AppData, session: SessionCrypto) {
-        // Clamp selection against the loaded wallet count.
-        if self.selected_wallet >= data.wallets.len() {
-            self.selected_wallet = 0;
-        }
+        // Restore the wallet the parent had open last, by identity rather
+        // than position -- an index alone can't tell a deleted wallet from
+        // a merely-reordered one. `pending_wallet_selection_name` is only
+        // populated once (from the last run's persisted state), so a
+        // second unlock later in the same run (e.g. after an in-process
+        // lock) falls through to the index branch, which by then already
+        // holds whatever the parent had selected before locking.
+        self.selected_wallet = match self.pending_wallet_selection_name.take() {
+            Some(name) => data
+                .wallets
+                .iter()
+                .position(|wallet| wallet.child_name == name)
+                // Named wallet no longer exists (deleted) -- fall back to
+                // the first wallet, per issue #135.
+                .unwrap_or(0),
+            // No name was ever persisted (state saved by a pre-#135 build,
+            // or this is a later unlock in the same run): keep the
+            // existing index-based clamp so upgrading doesn't regress #113.
+            None if self.selected_wallet < data.wallets.len() => self.selected_wallet,
+            None => 0,
+        };
         self.data = data;
         let legacy = session.version() == crypto::LEGACY_PIN_VERSION;
         self.session = Some(session);
@@ -1598,6 +1630,11 @@ impl eframe::App for CofferlyApp {
         let state = UiState {
             selected_wallet: self.selected_wallet,
             ledger_sort_newest_first: matches!(self.ledger_sort, LedgerSort::NewestFirst),
+            selected_wallet_name: self
+                .data
+                .wallets
+                .get(self.selected_wallet)
+                .map(|wallet| wallet.child_name.clone()),
         };
         eframe::set_value(storage, UI_STATE_KEY, &state);
     }
@@ -1919,13 +1956,20 @@ fn export_opener_failed_status(kind: &str, path: &Path, err: impl std::fmt::Disp
     ))
 }
 
-fn restore_ui_state(cc: &eframe::CreationContext<'_>, wallet_count: usize) -> (usize, LedgerSort) {
+/// Returns the eagerly-clamped index (a placeholder only good enough for the
+/// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`),
+/// the persisted ledger sort, and the persisted wallet name (if any), which
+/// `apply_unlock` resolves against the real wallet list once it's known.
+fn restore_ui_state(
+    cc: &eframe::CreationContext<'_>,
+    wallet_count: usize,
+) -> (usize, LedgerSort, Option<String>) {
     let wallet_count = wallet_count.max(1);
     let Some(storage) = cc.storage else {
-        return (0, LedgerSort::NewestFirst);
+        return (0, LedgerSort::NewestFirst, None);
     };
     let Some(state) = eframe::get_value::<UiState>(storage, UI_STATE_KEY) else {
-        return (0, LedgerSort::NewestFirst);
+        return (0, LedgerSort::NewestFirst, None);
     };
     let selected = state.selected_wallet.min(wallet_count.saturating_sub(1));
     let sort = if state.ledger_sort_newest_first {
@@ -1933,7 +1977,7 @@ fn restore_ui_state(cc: &eframe::CreationContext<'_>, wallet_count: usize) -> (u
     } else {
         LedgerSort::OldestFirst
     };
-    (selected, sort)
+    (selected, sort, state.selected_wallet_name)
 }
 
 pub(crate) fn pin_digit_id(index: usize) -> egui::Id {
@@ -2130,6 +2174,7 @@ mod app_tests {
             capture: None,
             capturing: false,
             temp_artifact_paths: Vec::new(),
+            pending_wallet_selection_name: None,
         };
         (app, dir)
     }
@@ -2793,6 +2838,7 @@ mod app_tests {
             &UiState {
                 selected_wallet: 4,
                 ledger_sort_newest_first: true,
+                selected_wallet_name: None,
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -2811,6 +2857,144 @@ mod app_tests {
 
         assert_eq!(app.selected_wallet, 4);
         assert_eq!(app.selected_wallet().child_name, "Child 5");
+    }
+
+    /// Issue #135: persisted selection should follow the wallet's identity
+    /// (`child_name`), not its position, so unlock restores the same child
+    /// even though the placeholder position (index 0) differs from where
+    /// the wallet actually landed.
+    #[test]
+    fn unlock_restores_last_selected_wallet_by_name() {
+        let (mut app, _dir) = test_app();
+        app.pending_wallet_selection_name = Some("Charlie".to_owned());
+
+        let mut data = default_app_data();
+        data.wallets = vec![
+            Wallet {
+                child_name: "Alice".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+            Wallet {
+                child_name: "Bob".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+            Wallet {
+                child_name: "Charlie".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+        ];
+        let session = SessionCrypto::establish("test-secret").unwrap();
+
+        app.apply_unlock(data, session);
+
+        assert_eq!(app.selected_wallet, 2);
+        assert_eq!(app.selected_wallet().child_name, "Charlie");
+        assert!(
+            app.pending_wallet_selection_name.is_none(),
+            "the persisted name should be consumed once resolved"
+        );
+    }
+
+    /// Issue #135: if the previously-selected wallet was deleted while
+    /// locked (or on another launch), unlock should fall back to the first
+    /// wallet rather than silently landing on whatever wallet now occupies
+    /// the old index.
+    #[test]
+    fn unlock_falls_back_to_first_wallet_when_selected_wallet_was_deleted() {
+        let (mut app, _dir) = test_app();
+        app.selected_wallet = 1;
+        app.pending_wallet_selection_name = Some("Charlie".to_owned());
+
+        // "Charlie" is gone; "Alice" now sits at index 0.
+        let mut data = default_app_data();
+        data.wallets = vec![
+            Wallet {
+                child_name: "Alice".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+            Wallet {
+                child_name: "Bob".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+        ];
+        let session = SessionCrypto::establish("test-secret").unwrap();
+
+        app.apply_unlock(data, session);
+
+        assert_eq!(app.selected_wallet, 0);
+        assert_eq!(app.selected_wallet().child_name, "Alice");
+    }
+
+    /// Issue #135: selecting a wallet, locking, and unlocking again within
+    /// the same run (no relaunch, so `raw_bytes`/`pending_wallet_selection_name`
+    /// aren't repopulated from disk) must keep the selection the parent had
+    /// -- `apply_unlock`'s no-persisted-name branch should defer to whatever
+    /// index is already in memory instead of resetting to 0.
+    #[test]
+    fn selection_persists_across_a_lock_and_unlock_cycle() {
+        let (mut app, _dir) = test_app();
+        app.data.wallets = vec![
+            Wallet {
+                child_name: "Alice".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+            Wallet {
+                child_name: "Bob".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+        ];
+        app.select_wallet(1);
+        assert_eq!(app.selected_wallet, 1);
+
+        app.lock_parent();
+        assert!(!app.parent_unlocked);
+        // Locking mid-run never touches the in-memory wallet list or index.
+        assert_eq!(app.selected_wallet, 1);
+
+        let data = app.data.clone();
+        let session = SessionCrypto::establish("test-secret").unwrap();
+        app.apply_unlock(data, session);
+
+        assert_eq!(app.selected_wallet, 1);
+        assert_eq!(app.selected_wallet().child_name, "Bob");
+    }
+
+    /// Issue #135 + #131: keyboard wallet switching (`apply_wallet_keyboard_delta`)
+    /// goes through the same `select_wallet` as a sidebar click, so `save()`
+    /// must persist the keyboard-selected wallet's name too -- persistence
+    /// should not care which input method changed the selection.
+    #[test]
+    fn keyboard_wallet_switch_persists_through_save_like_a_sidebar_click() {
+        let (mut app, _dir) = test_app();
+        app.data.wallets = vec![
+            Wallet {
+                child_name: "Alice".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+            Wallet {
+                child_name: "Bob".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+            },
+        ];
+
+        app.apply_wallet_keyboard_delta(1);
+        assert_eq!(app.selected_wallet, 1);
+
+        let mut storage = FakeStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let saved = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
+        assert_eq!(saved.selected_wallet, 1);
+        assert_eq!(saved.selected_wallet_name.as_deref(), Some("Bob"));
     }
 
     #[test]
