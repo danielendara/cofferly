@@ -1158,11 +1158,27 @@ impl CofferlyApp {
         const ROW_HEIGHT: f32 = 42.0;
 
         ui.horizontal(|ui| {
-            ui.add(
+            if self.pending_ledger_filter_focus {
+                self.pending_ledger_filter_focus = false;
+                ui.memory_mut(|memory| memory.request_focus(crate::ledger_filter_id()));
+            }
+
+            let filter_response = ui.add(
                 egui::TextEdit::singleline(&mut self.ledger_filter)
+                    .id(crate::ledger_filter_id())
                     .hint_text("Filter by description")
                     .desired_width(260.0),
             );
+            // Esc while the filter is focused clears it AND blurs (rather than just
+            // clearing) — leaving it focused-but-empty would make a second Esc a
+            // no-op with no visible feedback, and blurring lets `/` cleanly refocus
+            // for a fresh search. Esc elsewhere (entry form, etc.) doesn't reach
+            // here since `filter_response` is this specific widget's own focus.
+            if filter_response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.ledger_filter.clear();
+                filter_response.surrender_focus();
+            }
+
             if !self.ledger_filter.is_empty() && ui.button("Clear").clicked() {
                 self.ledger_filter.clear();
             }
