@@ -32,9 +32,10 @@ pub struct Entry {
     pub amount_cents: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EntryKind {
     Deposit,
+    #[default]
     Deduction,
 }
 
