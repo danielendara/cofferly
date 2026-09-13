@@ -191,6 +191,22 @@ impl Wallet {
             .map(OwnedLedgerRow::from_borrowed)
             .collect()
     }
+
+    /// The most recently recorded deposit, for "Repeat last deposit" prefill.
+    ///
+    /// Entries don't carry their own `EntryKind` tag; a deposit is any entry
+    /// with a positive `amount_cents` (deductions are stored negative -- see
+    /// `add_entry`'s `signed_amount`). Newest is chosen by date, tie-broken by
+    /// list index (the entry added later wins), matching the ordering
+    /// `ledger_rows_sorted` uses for `LedgerSort::NewestFirst`.
+    pub fn latest_deposit(&self) -> Option<&Entry> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.amount_cents > 0)
+            .max_by_key(|(index, entry)| (entry.date, *index))
+            .map(|(_, entry)| entry)
+    }
 }
 
 fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
@@ -456,5 +472,84 @@ mod tests {
         let descriptions: Vec<_> = rows.iter().map(|row| row.description).collect();
 
         assert_eq!(descriptions, ["Starting balance", "First", "Second"]);
+    }
+
+    #[test]
+    fn latest_deposit_is_none_without_any_entries() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 500,
+            entries: Vec::new(),
+        };
+
+        assert!(wallet.latest_deposit().is_none());
+    }
+
+    #[test]
+    fn latest_deposit_is_none_with_only_deductions() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 500,
+            entries: vec![Entry {
+                date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                description: "Snack".to_owned(),
+                amount_cents: -200,
+            }],
+        };
+
+        assert!(wallet.latest_deposit().is_none());
+    }
+
+    #[test]
+    fn latest_deposit_picks_newest_by_date_ignoring_deductions() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Allowance".to_owned(),
+                    amount_cents: 1000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Snack".to_owned(),
+                    amount_cents: -200,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                    description: "Birthday gift".to_owned(),
+                    amount_cents: 2500,
+                },
+            ],
+        };
+
+        let latest = wallet.latest_deposit().unwrap();
+        assert_eq!(latest.description, "Birthday gift");
+        assert_eq!(latest.amount_cents, 2500);
+    }
+
+    #[test]
+    fn latest_deposit_breaks_same_day_ties_by_list_index() {
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Allowance".to_owned(),
+                    amount_cents: 1000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Bonus chore".to_owned(),
+                    amount_cents: 300,
+                },
+            ],
+        };
+
+        let latest = wallet.latest_deposit().unwrap();
+        assert_eq!(latest.description, "Bonus chore");
+        assert_eq!(latest.amount_cents, 300);
     }
 }

@@ -1278,6 +1278,26 @@ impl CofferlyApp {
         self.pending_entry_focus = Some(EntryFormField::Date);
     }
 
+    /// Prefills the draft from the selected wallet's newest deposit (amount +
+    /// description), with today's date, so a parent can log a repeat deposit
+    /// (e.g. weekly allowance) without retyping it. Does not submit -- the
+    /// parent still confirms via the normal Add button and its validation.
+    fn repeat_last_deposit(&mut self) {
+        let Some((amount_cents, description)) = self
+            .selected_wallet()
+            .latest_deposit()
+            .map(|deposit| (deposit.amount_cents, deposit.description.clone()))
+        else {
+            return;
+        };
+        self.draft.kind = EntryKind::Deposit;
+        self.draft.amount = format_money_input(amount_cents);
+        self.draft.description = description;
+        self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        self.confirm_negative_cents = None;
+        self.pending_entry_focus = Some(EntryFormField::Amount);
+    }
+
     fn prefill_settings_from_selected(&mut self) {
         let wallet = self.selected_wallet();
         let name = wallet.child_name.clone();
@@ -3508,6 +3528,106 @@ mod app_tests {
             format_ledger_date(Local::now().date_naive())
         );
         assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
+    }
+
+    #[test]
+    fn repeat_last_deposit_is_absent_with_no_entries() {
+        let (app, _dir) = test_app();
+
+        assert!(app.selected_wallet().latest_deposit().is_none());
+    }
+
+    #[test]
+    fn repeat_last_deposit_is_absent_with_only_deductions() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+
+        assert!(app.selected_wallet().latest_deposit().is_none());
+    }
+
+    #[test]
+    fn repeat_last_deposit_prefills_newest_deposit_amount_and_description_with_todays_date() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "10".to_owned();
+        app.draft.date_input = "06/01/2026".to_owned();
+        app.add_entry();
+
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "3".to_owned();
+        app.add_entry();
+
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Birthday gift".to_owned();
+        app.draft.amount = "25".to_owned();
+        app.draft.date_input = "06/05/2026".to_owned();
+        app.add_entry();
+
+        // Clear the draft so the assertions below only reflect the repeat action.
+        app.draft = EntryDraft::new();
+        app.draft.kind = EntryKind::Deduction;
+        app.pending_entry_focus = None;
+
+        app.repeat_last_deposit();
+
+        assert_eq!(app.draft.kind, EntryKind::Deposit);
+        assert_eq!(app.draft.amount, format_money_input(2500));
+        assert_eq!(app.draft.description, "Birthday gift");
+        assert_eq!(
+            app.draft.date_input,
+            format_ledger_date(Local::now().date_naive())
+        );
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Amount));
+    }
+
+    #[test]
+    fn repeat_last_deposit_prefill_still_goes_through_normal_add_entry_validation() {
+        // A prefilled draft must not bypass validation: an oversized amount
+        // should still be rejected the same way a manually typed one would.
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "10".to_owned();
+        app.add_entry();
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+
+        app.repeat_last_deposit();
+        assert_eq!(app.draft.amount, format_money_input(1000));
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 2);
+        assert_eq!(app.selected_wallet().entries[1].amount_cents, 1000);
+        assert_eq!(
+            app.selected_wallet().entries[1].description,
+            "Weekly allowance"
+        );
+        assert_eq!(
+            app.selected_wallet().entries[1].date,
+            Local::now().date_naive()
+        );
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+    }
+
+    #[test]
+    fn repeat_last_deposit_does_nothing_when_no_deposit_exists() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+
+        let draft_before = app.draft.clone();
+        app.repeat_last_deposit();
+
+        assert_eq!(app.draft.kind, draft_before.kind);
+        assert_eq!(app.draft.amount, draft_before.amount);
+        assert_eq!(app.draft.description, draft_before.description);
     }
 
     #[test]
