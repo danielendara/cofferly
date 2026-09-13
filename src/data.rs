@@ -209,6 +209,32 @@ impl Wallet {
     }
 }
 
+/// Narrows already-sorted ledger rows to those matching a case-insensitive
+/// description substring search, for the ledger table's local filter
+/// (issue #139). Purely a display-level view over `rows`: it never touches
+/// `Wallet::entries` and preserves the input order (i.e. whatever sort was
+/// already applied), it only omits non-matching entries.
+///
+/// The starting-balance row is exempt from the filter and always kept,
+/// per the issue's stated preference ("always show start row") -- it isn't
+/// a real transaction a parent would be searching for, and hiding it would
+/// make an empty-looking table ambiguous with the "no matches" case.
+///
+/// An empty (or whitespace-only) query matches every row.
+pub fn filter_ledger_rows<'a>(rows: &'a [OwnedLedgerRow], query: &str) -> Vec<&'a OwnedLedgerRow> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return rows.iter().collect();
+    }
+
+    rows.iter()
+        .filter(|row| {
+            matches!(row.date, LedgerRowDate::Start)
+                || row.description.to_lowercase().contains(&query)
+        })
+        .collect()
+}
+
 fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
     match (left, right) {
         (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
@@ -472,6 +498,89 @@ mod tests {
         let descriptions: Vec<_> = rows.iter().map(|row| row.description).collect();
 
         assert_eq!(descriptions, ["Starting balance", "First", "Second"]);
+    }
+
+    fn filter_test_wallet() -> Wallet {
+        Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 1000,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Weekly allowance".to_owned(),
+                    amount_cents: 500,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Snack".to_owned(),
+                    amount_cents: -200,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                    description: "Birthday gift".to_owned(),
+                    amount_cents: 2500,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn filter_ledger_rows_with_empty_query_returns_every_row_unchanged() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        let filtered = filter_ledger_rows(&rows, "");
+        let descriptions: Vec<_> = filtered
+            .iter()
+            .map(|row| row.description.as_str())
+            .collect();
+
+        assert_eq!(
+            descriptions,
+            [
+                "Starting balance",
+                "Weekly allowance",
+                "Snack",
+                "Birthday gift"
+            ]
+        );
+    }
+
+    #[test]
+    fn filter_ledger_rows_narrows_to_case_insensitive_substring_matches() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        let filtered = filter_ledger_rows(&rows, "ALLOW");
+        let descriptions: Vec<_> = filtered
+            .iter()
+            .map(|row| row.description.as_str())
+            .collect();
+
+        // The starting-balance row is always kept alongside whatever entries match.
+        assert_eq!(descriptions, ["Starting balance", "Weekly allowance"]);
+    }
+
+    #[test]
+    fn filter_ledger_rows_always_keeps_the_starting_balance_row() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        // A query that matches zero entries still keeps the start row.
+        let filtered = filter_ledger_rows(&rows, "nonexistent description");
+
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0].date, LedgerRowDate::Start));
+    }
+
+    #[test]
+    fn filter_ledger_rows_treats_whitespace_only_query_as_empty() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        let filtered = filter_ledger_rows(&rows, "   ");
+
+        assert_eq!(filtered.len(), rows.len());
     }
 
     #[test]

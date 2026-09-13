@@ -185,6 +185,10 @@ pub(crate) struct CofferlyApp {
     /// `Arc` so handing a copy to the table each frame is a pointer bump, not a
     /// re-allocation of every row's description.
     ledger_cache: Option<(usize, LedgerSort, Arc<[OwnedLedgerRow]>)>,
+    /// Local, unpersisted description search over the ledger table. Display-only:
+    /// it narrows which rows `ledger_table` renders but never touches
+    /// `Wallet::entries`, the cached sort order, or `ledger_cache` itself.
+    ledger_filter: String,
     draft: EntryDraft,
     starting_balance_input: String,
     child_name_input: String,
@@ -398,6 +402,7 @@ impl CofferlyApp {
             selected_wallet,
             ledger_sort,
             ledger_cache: None,
+            ledger_filter: String::new(),
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
             child_name_input: String::new(),
@@ -2149,6 +2154,7 @@ fn load_story_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::
 #[cfg(test)]
 mod app_tests {
     use super::*;
+    use crate::data::filter_ledger_rows;
     use chrono::NaiveDate;
     use eframe::App as _;
     use tempfile::{tempdir, TempDir};
@@ -2162,6 +2168,7 @@ mod app_tests {
             selected_wallet: 0,
             ledger_sort: LedgerSort::NewestFirst,
             ledger_cache: None,
+            ledger_filter: String::new(),
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
             child_name_input: String::new(),
@@ -3528,6 +3535,40 @@ mod app_tests {
             format_ledger_date(Local::now().date_naive())
         );
         assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
+    }
+
+    #[test]
+    fn ledger_filter_is_local_ui_state_that_leaves_entries_and_cache_untouched() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "2".to_owned();
+        app.add_entry();
+
+        assert_eq!(app.ledger_filter, "", "starts empty by default");
+
+        app.ledger_filter = "allow".to_owned();
+        let rows = app.cached_ledger_rows();
+        let filtered = filter_ledger_rows(&rows, &app.ledger_filter);
+        let descriptions: Vec<_> = filtered
+            .iter()
+            .map(|row| row.description.as_str())
+            .collect();
+
+        // Default sort is newest-first, so the entry sorts ahead of the
+        // always-kept starting-balance row.
+        assert_eq!(descriptions, ["Weekly allowance", "Starting balance"]);
+        // Filtering is display-only: the underlying entries and sorted cache
+        // are unaffected by whatever the filter text is.
+        assert_eq!(app.selected_wallet().entries.len(), 2);
+
+        app.ledger_filter.clear();
+        let unfiltered = filter_ledger_rows(&rows, &app.ledger_filter);
+        assert_eq!(unfiltered.len(), rows.len());
     }
 
     #[test]

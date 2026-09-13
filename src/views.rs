@@ -8,8 +8,8 @@
 use eframe::egui;
 
 use crate::data::{
-    description_length_accessible_name, description_length_label, valid_child_name, LedgerRowDate,
-    LedgerSort,
+    description_length_accessible_name, description_length_label, filter_ledger_rows,
+    valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -1157,6 +1157,29 @@ impl CofferlyApp {
         let mut toggle_sort = false;
         const ROW_HEIGHT: f32 = 42.0;
 
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.ledger_filter)
+                    .hint_text("Filter by description")
+                    .desired_width(260.0),
+            );
+            if !self.ledger_filter.is_empty() && ui.button("Clear").clicked() {
+                self.ledger_filter.clear();
+            }
+        });
+        ui.add_space(8.0);
+
+        // Display-only filter: narrows which cached rows are rendered below
+        // without mutating `Wallet::entries`, re-sorting, or touching
+        // `ledger_cache`. The starting-balance row is always kept regardless
+        // of the query -- see `filter_ledger_rows`'s doc comment for why.
+        let query = self.ledger_filter.trim().to_owned();
+        let filtered_rows = filter_ledger_rows(&rows, &self.ledger_filter);
+        let has_matching_entries = filtered_rows
+            .iter()
+            .any(|row| !matches!(row.date, LedgerRowDate::Start));
+        let no_matches = !query.is_empty() && !has_matching_entries;
+
         egui_extras::TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -1230,9 +1253,9 @@ impl CofferlyApp {
             })
             .body(|body| {
                 // Virtualized rows: only visible rows are laid out each frame.
-                body.rows(ROW_HEIGHT, rows.len(), |mut row| {
+                body.rows(ROW_HEIGHT, filtered_rows.len(), |mut row| {
                     let index = row.index();
-                    let ledger_row = &rows[index];
+                    let ledger_row = filtered_rows[index];
                     let is_start = matches!(ledger_row.date, LedgerRowDate::Start);
 
                     row.col(|ui| {
@@ -1280,6 +1303,16 @@ impl CofferlyApp {
                     });
                 });
             });
+
+        if no_matches {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!("No entries match \"{query}\""))
+                    .size(12.0)
+                    .italics()
+                    .color(theme::TEXT_SECONDARY),
+            );
+        }
 
         if toggle_sort {
             self.ledger_sort.toggle();
