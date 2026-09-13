@@ -189,6 +189,9 @@ pub(crate) struct CofferlyApp {
     /// it narrows which rows `ledger_table` renders but never touches
     /// `Wallet::entries`, the cached sort order, or `ledger_cache` itself.
     ledger_filter: String,
+    /// Set by the `/` shortcut, consumed (and cleared) the next time
+    /// `ledger_table` renders the filter field.
+    pending_ledger_filter_focus: bool,
     draft: EntryDraft,
     starting_balance_input: String,
     child_name_input: String,
@@ -403,6 +406,7 @@ impl CofferlyApp {
             ledger_sort,
             ledger_cache: None,
             ledger_filter: String::new(),
+            pending_ledger_filter_focus: false,
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
             child_name_input: String::new(),
@@ -505,6 +509,20 @@ impl CofferlyApp {
             return;
         };
         self.apply_wallet_keyboard_delta(delta);
+    }
+
+    /// `/` focuses the ledger description filter — not while a text field
+    /// already has focus (so typing a literal `/` elsewhere, e.g. in the
+    /// entry form, is unaffected) or Settings is open. The lock/story screen
+    /// returns from `ui()` before this is ever called, so it's inert there
+    /// without needing its own guard.
+    fn handle_ledger_filter_shortcut(&mut self, ctx: &egui::Context) {
+        if self.show_settings || ctx.text_edit_focused() {
+            return;
+        }
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash)) {
+            self.pending_ledger_filter_focus = true;
+        }
     }
 
     fn apply_wallet_keyboard_delta(&mut self, delta: isize) {
@@ -1687,6 +1705,7 @@ impl eframe::App for CofferlyApp {
         }
 
         self.handle_wallet_keyboard_nav(&ctx);
+        self.handle_ledger_filter_shortcut(&ctx);
 
         egui::Panel::top("header")
             .frame(
@@ -2013,6 +2032,10 @@ pub(crate) fn entry_field_id(field: EntryFormField) -> egui::Id {
     egui::Id::new(("entry_form_field", field))
 }
 
+pub(crate) fn ledger_filter_id() -> egui::Id {
+    egui::Id::new("ledger_filter")
+}
+
 fn wallet_keyboard_delta(key: egui::Key) -> Option<isize> {
     match key {
         egui::Key::ArrowDown | egui::Key::CloseBracket => Some(1),
@@ -2169,6 +2192,7 @@ mod app_tests {
             ledger_sort: LedgerSort::NewestFirst,
             ledger_cache: None,
             ledger_filter: String::new(),
+            pending_ledger_filter_focus: false,
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
             child_name_input: String::new(),
@@ -2737,6 +2761,48 @@ mod app_tests {
         app.select_wallet(1);
 
         assert!(app.undo.is_none());
+    }
+
+    /// Feeds a single key press through a real egui input pass, mirroring how
+    /// `handle_ledger_filter_shortcut`'s `consume_key` actually reads it —
+    /// there is no lighter-weight way to exercise `ctx.input_mut`/
+    /// `ctx.text_edit_focused` guards than a real (if minimal) pass.
+    fn press_key(ctx: &egui::Context, key: egui::Key) {
+        ctx.begin_pass(egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn slash_focuses_the_ledger_filter_when_nothing_else_has_focus() {
+        let (mut app, _dir) = test_app();
+        let ctx = egui::Context::default();
+        press_key(&ctx, egui::Key::Slash);
+
+        app.handle_ledger_filter_shortcut(&ctx);
+
+        assert!(app.pending_ledger_filter_focus);
+        ctx.end_pass().textures_delta.clear();
+    }
+
+    #[test]
+    fn slash_is_ignored_while_settings_is_open() {
+        let (mut app, _dir) = test_app();
+        app.show_settings = true;
+        let ctx = egui::Context::default();
+        press_key(&ctx, egui::Key::Slash);
+
+        app.handle_ledger_filter_shortcut(&ctx);
+
+        assert!(!app.pending_ledger_filter_focus);
+        ctx.end_pass().textures_delta.clear();
     }
 
     #[test]
