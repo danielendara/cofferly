@@ -1286,6 +1286,10 @@ impl CofferlyApp {
         self.draft.description.clear();
         self.draft.amount.clear();
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        // Same focus path as validation failures — lands the parent back in
+        // Description for rapid multi-entry logging instead of wherever
+        // focus happened to be.
+        self.pending_entry_focus = Some(EntryFormField::Description);
         self.invalidate_ledger_cache();
         self.save_with_success(status);
     }
@@ -3586,6 +3590,53 @@ mod app_tests {
         assert!(app.confirm_negative_cents.is_none());
         assert!(app.selected_wallet().entries.is_empty());
         assert_eq!(app.status.text, "Spending not recorded.");
+    }
+
+    #[test]
+    fn canceling_a_negative_spend_confirm_does_not_steal_focus_to_description() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+        app.pending_entry_focus = None;
+
+        app.cancel_negative_spend_confirm();
+
+        assert_eq!(app.pending_entry_focus, None);
+    }
+
+    #[test]
+    fn successful_add_focuses_description_for_rapid_multi_entry_logging() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deposit;
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.amount = "10".to_owned();
+        app.pending_entry_focus = None;
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
+        // Clear/sticky behavior unchanged.
+        assert_eq!(app.draft.description, "");
+        assert_eq!(app.draft.amount, "");
+        assert_eq!(app.draft.kind, EntryKind::Deposit);
+    }
+
+    #[test]
+    fn successful_money_out_after_negative_confirm_also_focuses_description() {
+        let (mut app, _dir) = test_app();
+        app.draft.kind = EntryKind::Deduction;
+        app.draft.description = "Snack".to_owned();
+        app.draft.amount = "5".to_owned();
+        app.add_entry();
+        assert_eq!(app.confirm_negative_cents, Some(500));
+
+        app.add_entry();
+
+        assert_eq!(app.selected_wallet().entries.len(), 1);
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
     }
 
     #[test]
