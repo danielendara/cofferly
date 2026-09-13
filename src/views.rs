@@ -975,6 +975,22 @@ impl CofferlyApp {
                         .size(12.0)
                         .color(theme::TEXT_SECONDARY),
                 );
+
+                if let Some(deposit) = self.selected_wallet().latest_deposit() {
+                    let label = format!(
+                        "Repeat last deposit ({})",
+                        format_money(deposit.amount_cents)
+                    );
+                    ui.add_space(6.0);
+                    if ui
+                        .add_sized([ui.available_width(), 28.0], egui::Button::new(label))
+                        .on_hover_text("Prefill Money in with the newest deposit's amount and description; today's date is used")
+                        .clicked()
+                    {
+                        self.repeat_last_deposit();
+                    }
+                }
+
                 ui.add_space(6.0);
 
                 ui.label(
