@@ -8,8 +8,8 @@
 use eframe::egui;
 
 use crate::data::{
-    description_length_accessible_name, description_length_label, filter_ledger_rows,
-    valid_child_name, LedgerRowDate, LedgerSort,
+    count_ledger_filter_entry_matches, description_length_accessible_name,
+    description_length_label, filter_ledger_rows, valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -1156,6 +1156,10 @@ impl CofferlyApp {
         let rows = self.cached_ledger_rows();
         let mut toggle_sort = false;
         const ROW_HEIGHT: f32 = 42.0;
+        let query = self.ledger_filter.trim().to_owned();
+        let filtered_rows = filter_ledger_rows(&rows, &self.ledger_filter);
+        let matching_entry_count = count_ledger_filter_entry_matches(&rows, &self.ledger_filter);
+        let no_matches = !query.is_empty() && matching_entry_count == 0;
 
         ui.horizontal(|ui| {
             if self.pending_ledger_filter_focus {
@@ -1179,8 +1183,15 @@ impl CofferlyApp {
                 filter_response.surrender_focus();
             }
 
-            if !self.ledger_filter.is_empty() && ui.button("Clear").clicked() {
-                self.ledger_filter.clear();
+            if !self.ledger_filter.is_empty() {
+                ui.label(
+                    egui::RichText::new(format!("{matching_entry_count} matching"))
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+                if ui.button("Clear").clicked() {
+                    self.ledger_filter.clear();
+                }
             }
         });
         ui.add_space(8.0);
@@ -1189,12 +1200,6 @@ impl CofferlyApp {
         // without mutating `Wallet::entries`, re-sorting, or touching
         // `ledger_cache`. The starting-balance row is always kept regardless
         // of the query -- see `filter_ledger_rows`'s doc comment for why.
-        let query = self.ledger_filter.trim().to_owned();
-        let filtered_rows = filter_ledger_rows(&rows, &self.ledger_filter);
-        let has_matching_entries = filtered_rows
-            .iter()
-            .any(|row| !matches!(row.date, LedgerRowDate::Start));
-        let no_matches = !query.is_empty() && !has_matching_entries;
 
         egui_extras::TableBuilder::new(ui)
             .striped(true)

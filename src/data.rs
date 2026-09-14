@@ -236,6 +236,15 @@ pub fn filter_ledger_rows<'a>(rows: &'a [OwnedLedgerRow], query: &str) -> Vec<&'
         .collect()
 }
 
+/// Entry rows (excluding the starting-balance row) that match a ledger
+/// description filter. Delegates to [`filter_ledger_rows`].
+pub fn count_ledger_filter_entry_matches(rows: &[OwnedLedgerRow], query: &str) -> usize {
+    filter_ledger_rows(rows, query)
+        .iter()
+        .filter(|row| !matches!(row.date, LedgerRowDate::Start))
+        .count()
+}
+
 fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
     match (left, right) {
         (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
@@ -582,6 +591,16 @@ mod tests {
         let filtered = filter_ledger_rows(&rows, "   ");
 
         assert_eq!(filtered.len(), rows.len());
+    }
+
+    #[test]
+    fn count_ledger_filter_entry_matches_excludes_starting_balance_row() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        assert_eq!(count_ledger_filter_entry_matches(&rows, ""), 3);
+        assert_eq!(count_ledger_filter_entry_matches(&rows, "allow"), 1);
+        assert_eq!(count_ledger_filter_entry_matches(&rows, "nonexistent"), 0);
     }
 
     #[test]
