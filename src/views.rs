@@ -9,7 +9,8 @@ use eframe::egui;
 
 use crate::data::{
     count_ledger_filter_entry_matches, description_length_accessible_name,
-    description_length_label, filter_ledger_rows, valid_child_name, LedgerRowDate, LedgerSort,
+    description_length_label, filter_ledger_rows, sum_ledger_filter_entry_amounts,
+    valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -1159,6 +1160,7 @@ impl CofferlyApp {
         let query = self.ledger_filter.trim().to_owned();
         let filtered_rows = filter_ledger_rows(&rows, &self.ledger_filter);
         let matching_entry_count = count_ledger_filter_entry_matches(&rows, &self.ledger_filter);
+        let matching_net_cents = sum_ledger_filter_entry_amounts(&rows, &self.ledger_filter);
         let no_matches = !query.is_empty() && matching_entry_count == 0;
 
         ui.horizontal(|ui| {
@@ -1186,6 +1188,11 @@ impl CofferlyApp {
             if !self.ledger_filter.is_empty() {
                 ui.label(
                     egui::RichText::new(format!("{matching_entry_count} matching"))
+                        .size(12.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+                ui.label(
+                    egui::RichText::new(format_ledger_filter_net(matching_net_cents))
                         .size(12.0)
                         .color(theme::TEXT_SECONDARY),
                 );
@@ -1353,6 +1360,18 @@ fn draw_story_icon(ui: &egui::Ui, texture: &egui::TextureHandle, rect: egui::Rec
         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+fn format_ledger_filter_net(amount_cents: i64) -> String {
+    if amount_cents > 0 {
+        format!("net +{}", format_money(amount_cents))
+    } else if amount_cents < 0 {
+        let money = format_money(amount_cents);
+        let unsigned = money.trim_start_matches('-');
+        format!("net −{unsigned}")
+    } else {
+        format!("net {}", format_money(0))
+    }
 }
 
 fn format_ledger_amount_cell(amount_cents: i64, is_start: bool) -> String {
@@ -1592,6 +1611,13 @@ mod settings_layout_tests {
 #[cfg(test)]
 mod ledger_amount_a11y_tests {
     use super::*;
+
+    #[test]
+    fn ledger_filter_net_labels_positive_and_negative_amounts() {
+        assert_eq!(format_ledger_filter_net(1_200), "net +$12.00");
+        assert_eq!(format_ledger_filter_net(-500), "net −$5.00");
+        assert_eq!(format_ledger_filter_net(0), "net $0.00");
+    }
 
     #[test]
     fn ledger_amount_cell_uses_a_sign_not_color_alone() {

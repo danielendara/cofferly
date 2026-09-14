@@ -245,6 +245,16 @@ pub fn count_ledger_filter_entry_matches(rows: &[OwnedLedgerRow], query: &str) -
         .count()
 }
 
+/// Signed sum of matching entry amounts (excluding the starting-balance row).
+/// Delegates to [`filter_ledger_rows`].
+pub fn sum_ledger_filter_entry_amounts(rows: &[OwnedLedgerRow], query: &str) -> i64 {
+    filter_ledger_rows(rows, query)
+        .iter()
+        .filter(|row| !matches!(row.date, LedgerRowDate::Start))
+        .map(|row| row.amount_cents)
+        .sum()
+}
+
 fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
     match (left, right) {
         (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
@@ -601,6 +611,17 @@ mod tests {
         assert_eq!(count_ledger_filter_entry_matches(&rows, ""), 3);
         assert_eq!(count_ledger_filter_entry_matches(&rows, "allow"), 1);
         assert_eq!(count_ledger_filter_entry_matches(&rows, "nonexistent"), 0);
+    }
+
+    #[test]
+    fn sum_ledger_filter_entry_amounts_excludes_starting_balance_row() {
+        let wallet = filter_test_wallet();
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        assert_eq!(sum_ledger_filter_entry_amounts(&rows, ""), 2_800);
+        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "allow"), 500);
+        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "snack"), -200);
+        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "nonexistent"), 0);
     }
 
     #[test]
