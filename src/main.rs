@@ -2929,18 +2929,32 @@ mod app_tests {
         fn flush(&mut self) {}
     }
 
+    /// Serializes every reader/writer of `COFFERLY_DATA_DIR` so parallel tests
+    /// cannot overwrite each other's data dir.
+    static COFFERLY_DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Points `COFFERLY_DATA_DIR` at a temp dir for the life of the guard and
     /// restores the previous value on drop, so this test cannot leak state to
     /// others even if an assertion panics.
-    struct ScopedDataDir(Option<String>);
+    ///
+    /// Construction holds `COFFERLY_DATA_DIR_LOCK` for the guard lifetime.
+    struct ScopedDataDir {
+        previous: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
 
     impl ScopedDataDir {
         fn set(path: &std::path::Path) -> Self {
+            let lock = COFFERLY_DATA_DIR_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::env::var("COFFERLY_DATA_DIR").ok();
-            // SAFETY: no other test reads or writes COFFERLY_DATA_DIR, and
-            // this guard restores the previous value on drop.
+            // SAFETY: the mutex serializes every reader/writer of this env var.
             unsafe { std::env::set_var("COFFERLY_DATA_DIR", path) };
-            Self(previous)
+            Self {
+                previous,
+                _lock: lock,
+            }
         }
     }
 
@@ -2948,7 +2962,7 @@ mod app_tests {
         fn drop(&mut self) {
             // SAFETY: see `set` above.
             unsafe {
-                match &self.0 {
+                match &self.previous {
                     Some(previous) => std::env::set_var("COFFERLY_DATA_DIR", previous),
                     None => std::env::remove_var("COFFERLY_DATA_DIR"),
                 }
