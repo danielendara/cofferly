@@ -159,6 +159,11 @@ struct UiState {
     /// is `Deduction`, matching today's hardcoded `EntryDraft::new()` value.
     #[serde(default)]
     last_entry_kind: EntryKind,
+    /// Last ledger description filter, restored on unlock/relaunch. Display-only:
+    /// it narrows which rows render but never touches entries or cache.
+    /// `#[serde(default)]` so state persisted by older builds still deserializes.
+    #[serde(default)]
+    ledger_filter: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,9 +196,9 @@ pub(crate) struct CofferlyApp {
     /// `Arc` so handing a copy to the table each frame is a pointer bump, not a
     /// re-allocation of every row's description.
     ledger_cache: Option<(usize, LedgerSort, Arc<[OwnedLedgerRow]>)>,
-    /// Local, unpersisted description search over the ledger table. Display-only:
-    /// it narrows which rows `ledger_table` renders but never touches
-    /// `Wallet::entries`, the cached sort order, or `ledger_cache` itself.
+    /// Local description search over the ledger table, persisted via `UiState`.
+    /// Display-only: it narrows which rows `ledger_table` renders but never
+    /// touches `Wallet::entries`, the cached sort order, or `ledger_cache`.
     ledger_filter: String,
     /// Set by the `/` shortcut, consumed (and cleared) the next time
     /// `ledger_table` renders the filter field.
@@ -398,8 +403,13 @@ impl CofferlyApp {
         } else {
             data.wallets.len()
         };
-        let (selected_wallet, ledger_sort, pending_wallet_selection_name, last_entry_kind) =
-            restore_ui_state(cc, restore_wallet_bound);
+        let (
+            selected_wallet,
+            ledger_sort,
+            pending_wallet_selection_name,
+            last_entry_kind,
+            ledger_filter,
+        ) = restore_ui_state(cc, restore_wallet_bound);
         let mut draft = EntryDraft::new();
         draft.kind = last_entry_kind;
         let (lock_screen_image, lock_screen_bg) = load_lock_screen_image(&cc.egui_ctx);
@@ -413,7 +423,7 @@ impl CofferlyApp {
             selected_wallet,
             ledger_sort,
             ledger_cache: None,
-            ledger_filter: String::new(),
+            ledger_filter,
             pending_ledger_filter_focus: false,
             draft,
             starting_balance_input: String::new(),
@@ -1691,6 +1701,7 @@ impl eframe::App for CofferlyApp {
                 .get(self.selected_wallet)
                 .map(|wallet| wallet.child_name.clone()),
             last_entry_kind: self.draft.kind,
+            ledger_filter: self.ledger_filter.clone(),
         };
         eframe::set_value(storage, UI_STATE_KEY, &state);
     }
@@ -2017,18 +2028,31 @@ fn export_opener_failed_status(kind: &str, path: &Path, err: impl std::fmt::Disp
 /// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`),
 /// the persisted ledger sort, the persisted wallet name (if any, which
 /// `apply_unlock` resolves against the real wallet list once it's known),
-/// and the last-selected Money in/out kind (applied directly -- unlike the
-/// wallet name, it needs no real data to resolve against).
+/// the last-selected Money in/out kind, and the ledger description filter
+/// (applied directly -- unlike the wallet name, they need no real data to
+/// resolve against).
 fn restore_ui_state(
     cc: &eframe::CreationContext<'_>,
     wallet_count: usize,
-) -> (usize, LedgerSort, Option<String>, EntryKind) {
+) -> (usize, LedgerSort, Option<String>, EntryKind, String) {
     let wallet_count = wallet_count.max(1);
     let Some(storage) = cc.storage else {
-        return (0, LedgerSort::NewestFirst, None, EntryKind::default());
+        return (
+            0,
+            LedgerSort::NewestFirst,
+            None,
+            EntryKind::default(),
+            String::new(),
+        );
     };
     let Some(state) = eframe::get_value::<UiState>(storage, UI_STATE_KEY) else {
-        return (0, LedgerSort::NewestFirst, None, EntryKind::default());
+        return (
+            0,
+            LedgerSort::NewestFirst,
+            None,
+            EntryKind::default(),
+            String::new(),
+        );
     };
     let selected = state.selected_wallet.min(wallet_count.saturating_sub(1));
     let sort = if state.ledger_sort_newest_first {
@@ -2041,7 +2065,21 @@ fn restore_ui_state(
         sort,
         state.selected_wallet_name,
         state.last_entry_kind,
+        restore_ledger_filter(state.ledger_filter),
     )
+}
+
+const LEDGER_FILTER_RESTORE_MAX_CHARS: usize = 80;
+
+fn restore_ledger_filter(saved: String) -> String {
+    if saved.chars().count() <= LEDGER_FILTER_RESTORE_MAX_CHARS {
+        saved
+    } else {
+        saved
+            .chars()
+            .take(LEDGER_FILTER_RESTORE_MAX_CHARS)
+            .collect()
+    }
 }
 
 pub(crate) fn pin_digit_id(index: usize) -> egui::Id {
@@ -2954,6 +2992,7 @@ mod app_tests {
                 ledger_sort_newest_first: true,
                 selected_wallet_name: None,
                 last_entry_kind: EntryKind::default(),
+                ledger_filter: String::new(),
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3141,6 +3180,7 @@ mod app_tests {
                 ledger_sort_newest_first: true,
                 selected_wallet_name: None,
                 last_entry_kind: EntryKind::Deposit,
+                ledger_filter: String::new(),
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3149,6 +3189,79 @@ mod app_tests {
         let app = CofferlyApp::new(&cc);
 
         assert_eq!(app.draft.kind, EntryKind::Deposit);
+    }
+
+    #[test]
+    fn ledger_filter_persists_through_save() {
+        let (mut app, _dir) = test_app();
+        app.ledger_filter = "allowance".to_owned();
+
+        let mut storage = FakeStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let saved = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
+        assert_eq!(saved.ledger_filter, "allowance");
+    }
+
+    #[test]
+    fn ledger_filter_restores_on_construction_and_caps_length() {
+        let dir = tempdir().unwrap();
+        let _data_dir = ScopedDataDir::set(dir.path());
+
+        let long_filter = "x".repeat(100);
+        let mut storage = FakeStorage::default();
+        eframe::set_value(
+            &mut storage,
+            UI_STATE_KEY,
+            &UiState {
+                selected_wallet: 0,
+                ledger_sort_newest_first: true,
+                selected_wallet_name: None,
+                last_entry_kind: EntryKind::default(),
+                ledger_filter: long_filter,
+            },
+        );
+        let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+        cc.storage = Some(&storage);
+
+        let app = CofferlyApp::new(&cc);
+
+        assert_eq!(app.ledger_filter, "x".repeat(80));
+    }
+
+    #[test]
+    fn ui_state_without_ledger_filter_field_still_loads_and_defaults_to_empty() {
+        let mut storage = FakeStorage::default();
+        eframe::set_value(
+            &mut storage,
+            UI_STATE_KEY,
+            &UiState {
+                selected_wallet: 2,
+                ledger_sort_newest_first: false,
+                selected_wallet_name: Some("Alice".to_owned()),
+                last_entry_kind: EntryKind::Deposit,
+                ledger_filter: "snack".to_owned(),
+            },
+        );
+
+        let raw = storage.get_string(UI_STATE_KEY).unwrap();
+        let without_field = raw.replacen(",ledger_filter:\"snack\"", "", 1);
+        assert_ne!(
+            raw, without_field,
+            "expected to find and strip ledger_filter from the RON record"
+        );
+        storage.set_string(UI_STATE_KEY, without_field);
+
+        let restored = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
+        assert_eq!(restored.ledger_filter, "");
+
+        let dir = tempdir().unwrap();
+        let _data_dir = ScopedDataDir::set(dir.path());
+        let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+        cc.storage = Some(&storage);
+
+        let app = CofferlyApp::new(&cc);
+        assert_eq!(app.ledger_filter, "");
     }
 
     #[test]
@@ -3162,6 +3275,7 @@ mod app_tests {
                 ledger_sort_newest_first: false,
                 selected_wallet_name: Some("Alice".to_owned()),
                 last_entry_kind: EntryKind::Deposit,
+                ledger_filter: String::new(),
             },
         );
 
