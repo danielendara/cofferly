@@ -1,4 +1,4 @@
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use eframe::egui;
 use eframe::egui::Color32;
 use std::collections::HashMap;
@@ -102,6 +102,48 @@ impl EntryDraft {
 struct RemovableEntry {
     wallet_index: usize,
     entry: Entry,
+}
+
+/// The entry most recently corrected in place, held briefly so the user can put
+/// it back. Same lifetime rules as `RemovableEntry` — one pending undo, cleared
+/// by the next mutation or a wallet switch.
+#[derive(Debug, Clone)]
+struct EditedEntry {
+    wallet_index: usize,
+    entry_index: usize,
+    previous: Entry,
+}
+
+/// The single pending undo. Removal and correction share the slot so there is
+/// never more than one "undo" on offer, and it always means the last change.
+#[derive(Debug, Clone)]
+enum PendingUndo {
+    Removed(RemovableEntry),
+    Edited(EditedEntry),
+}
+
+/// One validated entry form submission, shared by add and correct.
+#[derive(Debug, Clone)]
+struct ValidatedEntryInput {
+    /// Magnitude, always positive — what the warning copy talks about.
+    amount: i64,
+    /// What gets stored: negative for a deduction.
+    signed_amount: i64,
+    description: String,
+    date: NaiveDate,
+}
+
+/// An entry being corrected in place.
+///
+/// The correction reuses the add form (and therefore its validation, focus, and
+/// keyboard handling) by swapping the add draft out for the entry's values and
+/// restoring it afterwards — one form, one set of rules.
+#[derive(Debug, Clone)]
+struct EntryEditSession {
+    wallet_index: usize,
+    entry_index: usize,
+    original: Entry,
+    stashed_draft: EntryDraft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +282,9 @@ pub(crate) struct CofferlyApp {
     /// When `Some`, a Money-out that would leave the wallet below $0 is waiting
     /// for a second submit of the same amount.
     confirm_negative_cents: Option<i64>,
-    undo: Option<RemovableEntry>,
+    undo: Option<PendingUndo>,
+    entry_edit: Option<EntryEditSession>,
+    pending_ledger_edit_focus: Option<usize>,
     last_interaction: Instant,
     /// True while Argon2id / decrypt runs off the UI thread.
     unlocking: bool,
@@ -462,6 +506,8 @@ impl CofferlyApp {
             confirm_delete_wallet: false,
             confirm_negative_cents: None,
             undo: None,
+            entry_edit: None,
+            pending_ledger_edit_focus: None,
             last_interaction: Instant::now(),
             unlocking: false,
             unlock_rx: None,
@@ -1264,32 +1310,31 @@ impl CofferlyApp {
         self.pending_pin_focus = Some((last_filled + 1).min(PIN_LENGTH - 1));
     }
 
-    fn add_entry(&mut self) {
-        if !self.can_change("Unlock parent mode before adding entries.") {
-            return;
-        }
-        self.undo = None;
-        self.confirm_delete_wallet = false;
-
+    /// Validates the entry form once, for both adding and correcting.
+    ///
+    /// Returns the signed amount alongside the raw magnitude: deductions are
+    /// stored negative (see `Wallet::latest_deposit`), and the negative-balance
+    /// warning talks in magnitudes.
+    fn validated_entry_input(&mut self) -> Option<ValidatedEntryInput> {
         let amount = match parse_dollars_to_cents(&self.draft.amount) {
             Ok(amount) if amount > 0 => amount,
             _ => {
                 self.set_status_err("Enter a valid amount, like 10, 10.50, or $1,234.56.");
                 self.pending_entry_focus = Some(EntryFormField::Amount);
-                return;
+                return None;
             }
         };
         if !valid_cents(amount) {
             self.set_status_err("Enter a smaller amount.");
             self.pending_entry_focus = Some(EntryFormField::Amount);
-            return;
+            return None;
         }
 
         let description = self.draft.description.trim().to_owned();
         if !valid_description(&self.draft.description) {
             self.set_status_err("Add a description (1-100 characters).");
             self.pending_entry_focus = Some(EntryFormField::Description);
-            return;
+            return None;
         }
 
         let date = match parse_ledger_date(&self.draft.date_input) {
@@ -1297,24 +1342,49 @@ impl CofferlyApp {
             Err(err) => {
                 self.set_status_err(err);
                 self.pending_entry_focus = Some(EntryFormField::Date);
-                return;
+                return None;
             }
         };
         if date > Local::now().date_naive() {
             self.set_status_err("Use today or an earlier date.");
             self.pending_entry_focus = Some(EntryFormField::Date);
-            return;
+            return None;
         }
 
-        let action = match self.draft.kind {
-            EntryKind::Deposit => "Added",
-            EntryKind::Deduction => "Deducted",
-        };
         let signed_amount = match self.draft.kind {
             EntryKind::Deposit => amount,
             EntryKind::Deduction => -amount,
         };
 
+        Some(ValidatedEntryInput {
+            amount,
+            signed_amount,
+            description,
+            date,
+        })
+    }
+
+    fn add_entry(&mut self) {
+        if !self.can_change("Unlock parent mode before adding entries.") {
+            return;
+        }
+        self.undo = None;
+        self.confirm_delete_wallet = false;
+
+        let Some(input) = self.validated_entry_input() else {
+            return;
+        };
+        let ValidatedEntryInput {
+            amount,
+            signed_amount,
+            description,
+            date,
+        } = input;
+
+        let action = match self.draft.kind {
+            EntryKind::Deposit => "Added",
+            EntryKind::Deduction => "Deducted",
+        };
         if self.draft.kind == EntryKind::Deduction {
             let next_balance = self
                 .selected_wallet()
@@ -1362,6 +1432,186 @@ impl CofferlyApp {
         self.pending_entry_focus = Some(EntryFormField::Description);
         self.invalidate_ledger_cache();
         self.save_with_success(status);
+    }
+
+    /// Opens a correction for one entry: the add form is stashed and reloaded
+    /// with that entry's values, so every validation, focus, and keyboard rule
+    /// is the one the parent already knows.
+    fn begin_entry_edit(&mut self, entry_index: usize) {
+        if !self.can_change("Unlock parent mode before editing entries.") {
+            return;
+        }
+        let Some(entry) = self.selected_wallet().entries.get(entry_index).cloned() else {
+            self.set_status_err("That entry is no longer in the ledger.");
+            return;
+        };
+
+        self.confirm_delete_wallet = false;
+        self.confirm_negative_cents = None;
+
+        let stashed_draft = self.draft.clone();
+        self.draft.kind = if entry.amount_cents < 0 {
+            EntryKind::Deduction
+        } else {
+            EntryKind::Deposit
+        };
+        self.draft.amount = format_money_input(entry.amount_cents.abs());
+        self.draft.description = entry.description.clone();
+        self.draft.date_input = format_ledger_date(entry.date);
+
+        self.entry_edit = Some(EntryEditSession {
+            wallet_index: self.selected_wallet,
+            entry_index,
+            original: entry,
+            stashed_draft,
+        });
+        self.pending_entry_focus = Some(EntryFormField::Amount);
+        self.set_status_info(
+            "Correcting an entry. Save the correction, or cancel to leave it as it was.",
+        );
+    }
+
+    /// Leaves the entry exactly as it was and restores the half-typed new entry
+    /// the parent had going before they started correcting.
+    fn cancel_entry_edit(&mut self) {
+        let Some(session) = self.entry_edit.take() else {
+            return;
+        };
+        self.draft = session.stashed_draft;
+        self.confirm_negative_cents = None;
+        self.pending_ledger_edit_focus = Some(session.entry_index);
+        self.set_status_info("Correction cancelled.");
+    }
+
+    /// Would this candidate entry drive the running balance negative *at its own
+    /// position* (or anywhere after it)? A final-balance check misses exactly the
+    /// case this is for: a correction in the middle of the ledger.
+    fn edit_would_go_negative(&self, entry_index: usize, signed_amount: i64) -> bool {
+        let wallet = self.selected_wallet();
+        let mut balance = wallet.starting_balance_cents;
+        for (index, entry) in wallet.entries.iter().enumerate() {
+            let amount = if index == entry_index {
+                signed_amount
+            } else {
+                entry.amount_cents
+            };
+            balance = balance.saturating_add(amount);
+            if index >= entry_index && balance < 0 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Applies the correction. A failed vault write puts the previous entry back
+    /// rather than leaving a "saved" ledger that is not on disk.
+    fn commit_entry_edit(&mut self) {
+        if !self.can_change("Unlock parent mode before editing entries.") {
+            return;
+        }
+        let Some(session) = self.entry_edit.clone() else {
+            return;
+        };
+        if session.wallet_index != self.selected_wallet {
+            self.cancel_entry_edit();
+            return;
+        }
+        if self
+            .selected_wallet()
+            .entries
+            .get(session.entry_index)
+            .is_none()
+        {
+            self.entry_edit = None;
+            self.draft = session.stashed_draft;
+            self.set_status_err("That entry is no longer in the ledger.");
+            return;
+        }
+
+        let Some(input) = self.validated_entry_input() else {
+            return;
+        };
+
+        if input.signed_amount < 0
+            && self.edit_would_go_negative(session.entry_index, input.signed_amount)
+            && self.confirm_negative_cents != Some(input.amount)
+        {
+            self.confirm_negative_cents = Some(input.amount);
+            self.set_status_info(format!(
+                "This correction would leave {} below zero at that point in the ledger. Submit again to confirm.",
+                self.selected_wallet().child_name,
+            ));
+            return;
+        }
+        self.confirm_negative_cents = None;
+
+        let previous = session.original.clone();
+        let wallet_name = self.selected_wallet().child_name.clone();
+        let updated = Entry {
+            date: input.date,
+            description: input.description.clone(),
+            amount_cents: input.signed_amount,
+        };
+
+        if updated == previous {
+            self.entry_edit = None;
+            self.draft = session.stashed_draft;
+            self.pending_ledger_edit_focus = Some(session.entry_index);
+            self.set_status_info("Nothing changed — the entry is as it was.");
+            return;
+        }
+
+        self.selected_wallet_mut().entries[session.entry_index] = updated;
+        if !self.selected_wallet().balances_are_valid() {
+            self.selected_wallet_mut().entries[session.entry_index] = previous;
+            self.set_status_err(
+                "That correction would put the wallet outside Cofferly's supported range.",
+            );
+            self.pending_entry_focus = Some(EntryFormField::Amount);
+            return;
+        }
+
+        self.invalidate_ledger_cache();
+
+        let secret = if self.session.is_some() {
+            String::new()
+        } else {
+            self.data.parent_pin.clone()
+        };
+        if let Err(err) = self.save_encrypted_data_and_refresh_ref(&secret) {
+            // Roll the ledger back to disk's version — an unsaved correction
+            // must not survive in memory as if it had been written.
+            self.selected_wallet_mut().entries[session.entry_index] = previous;
+            self.invalidate_ledger_cache();
+            self.set_status_err(format!("Could not save: {err}"));
+            return;
+        }
+
+        self.undo = Some(PendingUndo::Edited(EditedEntry {
+            wallet_index: session.wallet_index,
+            entry_index: session.entry_index,
+            previous,
+        }));
+        self.entry_edit = None;
+        self.draft = session.stashed_draft;
+        self.pending_ledger_edit_focus = Some(session.entry_index);
+        self.set_status_ok(format!(
+            "Corrected entry for {wallet_name}: {} {}. Undo available.",
+            format_money(input.signed_amount),
+            input.description
+        ));
+    }
+
+    /// Wallet index and amount the pending undo would restore, for the button label.
+    fn pending_undo_summary(&self) -> Option<(usize, i64)> {
+        match self.undo.as_ref()? {
+            PendingUndo::Removed(removable) => {
+                Some((removable.wallet_index, removable.entry.amount_cents))
+            }
+            PendingUndo::Edited(edited) => {
+                Some((edited.wallet_index, edited.previous.amount_cents))
+            }
+        }
     }
 
     fn cancel_negative_spend_confirm(&mut self) {
@@ -1538,10 +1788,10 @@ impl CofferlyApp {
         let index = Self::newest_entry_index(&self.selected_wallet().entries);
         if let Some(index) = index {
             let entry = self.selected_wallet_mut().entries.remove(index);
-            self.undo = Some(RemovableEntry {
+            self.undo = Some(PendingUndo::Removed(RemovableEntry {
                 wallet_index: self.selected_wallet,
                 entry: entry.clone(),
-            });
+            }));
             self.invalidate_ledger_cache();
             self.save_with_success(format!(
                 "Removed latest entry from {}: {} {}. Undo available.",
@@ -1554,30 +1804,56 @@ impl CofferlyApp {
         }
     }
 
+    /// Undoes the last ledger change — a removal or a correction. One slot, so
+    /// this always means "put back what I just changed".
     fn undo_remove_entry(&mut self) {
         if !self.can_change("Unlock parent mode before undoing.") {
             return;
         }
         self.confirm_delete_wallet = false;
 
-        let Some(removable) = self.undo.take() else {
+        let Some(pending) = self.undo.take() else {
             return;
         };
 
-        let Some(wallet) = self.data.wallets.get_mut(removable.wallet_index) else {
-            self.set_status_err("Can't undo — that wallet no longer exists.");
-            return;
-        };
+        match pending {
+            PendingUndo::Removed(removable) => {
+                let Some(wallet) = self.data.wallets.get_mut(removable.wallet_index) else {
+                    self.set_status_err("Can't undo — that wallet no longer exists.");
+                    return;
+                };
 
-        wallet.entries.push(removable.entry.clone());
-        let wallet_name = wallet.child_name.clone();
-        self.invalidate_ledger_cache();
-        self.save_with_success(format!(
-            "Restored entry for {}: {} {}.",
-            wallet_name,
-            format_money(removable.entry.amount_cents),
-            removable.entry.description
-        ));
+                wallet.entries.push(removable.entry.clone());
+                let wallet_name = wallet.child_name.clone();
+                self.invalidate_ledger_cache();
+                self.save_with_success(format!(
+                    "Restored entry for {}: {} {}.",
+                    wallet_name,
+                    format_money(removable.entry.amount_cents),
+                    removable.entry.description
+                ));
+            }
+            PendingUndo::Edited(edited) => {
+                let Some(wallet) = self.data.wallets.get_mut(edited.wallet_index) else {
+                    self.set_status_err("Can't undo — that wallet no longer exists.");
+                    return;
+                };
+                let Some(slot) = wallet.entries.get_mut(edited.entry_index) else {
+                    self.set_status_err("Can't undo — that entry is no longer in the ledger.");
+                    return;
+                };
+
+                *slot = edited.previous.clone();
+                let wallet_name = wallet.child_name.clone();
+                self.invalidate_ledger_cache();
+                self.save_with_success(format!(
+                    "Reverted correction for {}: {} {}.",
+                    wallet_name,
+                    format_money(edited.previous.amount_cents),
+                    edited.previous.description
+                ));
+            }
+        }
     }
 
     fn delete_selected_wallet(&mut self) {
@@ -2355,6 +2631,8 @@ mod app_tests {
             confirm_delete_wallet: false,
             confirm_negative_cents: None,
             undo: None,
+            entry_edit: None,
+            pending_ledger_edit_focus: None,
             last_interaction: Instant::now(),
             unlocking: false,
             unlock_rx: None,
@@ -2617,6 +2895,227 @@ mod app_tests {
         assert_eq!(app.pending_pin_focus, Some(0));
         assert_eq!(app.status.text, "Coffer Story unlocked.");
         assert_eq!(app.status.severity, StatusSeverity::Success);
+    }
+
+    // --- #156: correcting a mistyped entry ---------------------------------
+
+    /// Wallet with three dated entries, so corrections land in the middle of a
+    /// ledger rather than only on the newest row.
+    fn app_with_entries() -> (CofferlyApp, TempDir) {
+        let (mut app, dir) = test_app();
+        let wallet = &mut app.data.wallets[0];
+        wallet.starting_balance_cents = 5_000;
+        wallet.entries = vec![
+            Entry {
+                date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+                description: "Weekly allowance".to_owned(),
+                amount_cents: 1_000,
+            },
+            Entry {
+                date: NaiveDate::from_ymd_opt(2026, 9, 5).unwrap(),
+                description: "bkie repair".to_owned(),
+                amount_cents: -12_500,
+            },
+            Entry {
+                date: NaiveDate::from_ymd_opt(2026, 9, 8).unwrap(),
+                description: "Birthday money".to_owned(),
+                amount_cents: 2_000,
+            },
+        ];
+        app.invalidate_ledger_cache();
+        (app, dir)
+    }
+
+    #[test]
+    fn ledger_rows_point_back_at_the_entry_they_came_from() {
+        let (mut app, _dir) = app_with_entries();
+        let rows = app.cached_ledger_rows();
+
+        // Newest first, and the synthetic starting-balance row owns no entry.
+        let indices: Vec<Option<usize>> = rows.iter().map(|row| row.entry_index).collect();
+        assert_eq!(indices, vec![Some(2), Some(1), Some(0), None]);
+    }
+
+    #[test]
+    fn editing_an_entry_rewrites_it_in_place_and_leaves_an_undo() {
+        let (mut app, _dir) = app_with_entries();
+
+        app.begin_entry_edit(1);
+        assert_eq!(app.draft.kind, EntryKind::Deduction);
+        assert_eq!(app.draft.amount, "125.00");
+        assert_eq!(app.draft.description, "bkie repair");
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Amount));
+
+        app.draft.amount = "$12.50".to_owned();
+        app.draft.description = "Bike repair".to_owned();
+        app.commit_entry_edit();
+
+        let entry = &app.selected_wallet().entries[1];
+        assert_eq!(entry.amount_cents, -1_250);
+        assert_eq!(entry.description, "Bike repair");
+        assert_eq!(entry.date, NaiveDate::from_ymd_opt(2026, 9, 5).unwrap());
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+        assert!(app.entry_edit.is_none());
+        assert!(app.undo.is_some());
+        // Focus goes back to the row the correction came from.
+        assert_eq!(app.pending_ledger_edit_focus, Some(1));
+        // The entry count never changes — a correction is not a delete + add.
+        assert_eq!(app.selected_wallet().entries.len(), 3);
+    }
+
+    #[test]
+    fn undo_restores_the_entry_exactly_as_it_was() {
+        let (mut app, _dir) = app_with_entries();
+        let before = app.selected_wallet().entries.clone();
+
+        app.begin_entry_edit(0);
+        app.draft.amount = "99.00".to_owned();
+        app.draft.description = "Changed my mind".to_owned();
+        app.draft.date_input = format_ledger_date(NaiveDate::from_ymd_opt(2026, 9, 2).unwrap());
+        app.commit_entry_edit();
+        assert_ne!(app.selected_wallet().entries, before);
+
+        app.undo_remove_entry();
+
+        assert_eq!(app.selected_wallet().entries, before);
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+        assert!(app.undo.is_none());
+    }
+
+    #[test]
+    fn editing_uses_the_same_validation_as_adding() {
+        let (mut app, _dir) = app_with_entries();
+
+        app.begin_entry_edit(0);
+        app.draft.amount = "not money".to_owned();
+        app.commit_entry_edit();
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Amount));
+        assert!(
+            app.entry_edit.is_some(),
+            "a bad amount keeps the correction open"
+        );
+
+        app.draft.amount = "10.00".to_owned();
+        app.draft.description = "   ".to_owned();
+        app.commit_entry_edit();
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
+
+        app.draft.description = "Weekly allowance".to_owned();
+        app.draft.date_input = "not a date".to_owned();
+        app.commit_entry_edit();
+        assert_eq!(app.pending_entry_focus, Some(EntryFormField::Date));
+
+        // Nothing was written while the form was invalid.
+        assert_eq!(app.selected_wallet().entries[0].amount_cents, 1_000);
+    }
+
+    #[test]
+    fn a_correction_that_goes_negative_mid_ledger_asks_first() {
+        let (mut app, _dir) = app_with_entries();
+        // Final balance stays positive after this correction, but the balance
+        // right after entry 1 does not — a final-balance check would miss it.
+        app.begin_entry_edit(1);
+        app.draft.amount = "70.00".to_owned();
+        app.commit_entry_edit();
+
+        assert_eq!(app.status.severity, StatusSeverity::Info);
+        assert!(app.status.text.contains("below zero"));
+        assert_eq!(
+            app.selected_wallet().entries[1].amount_cents,
+            -12_500,
+            "nothing is written until the parent confirms"
+        );
+
+        app.commit_entry_edit();
+        assert_eq!(app.selected_wallet().entries[1].amount_cents, -7_000);
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+        // Final balance was never negative — only the balance at that row was.
+        assert!(app.selected_wallet().current_balance_cents() > 0);
+    }
+
+    #[test]
+    fn edit_write_failure_rolls_the_ledger_back_to_disk() {
+        let (mut app, dir) = app_with_entries();
+        let before = app.selected_wallet().entries.clone();
+        app.data_path = unwritable_data_path(&dir);
+
+        app.begin_entry_edit(2);
+        app.draft.amount = "20.00".to_owned();
+        app.draft.description = "Birthday cash".to_owned();
+        app.commit_entry_edit();
+
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert!(app.status.text.starts_with("Could not save:"));
+        assert_eq!(
+            app.selected_wallet().entries,
+            before,
+            "an unsaved correction must not survive in memory"
+        );
+        assert!(app.undo.is_none(), "nothing to undo — nothing was applied");
+    }
+
+    #[test]
+    fn cancelling_a_correction_restores_the_half_typed_new_entry() {
+        let (mut app, _dir) = app_with_entries();
+        app.draft.description = "Half-typed thing".to_owned();
+        app.draft.amount = "7".to_owned();
+
+        app.begin_entry_edit(0);
+        assert_eq!(app.draft.description, "Weekly allowance");
+        app.draft.amount = "999.00".to_owned();
+        app.cancel_entry_edit();
+
+        assert_eq!(app.draft.description, "Half-typed thing");
+        assert_eq!(app.draft.amount, "7");
+        assert!(app.entry_edit.is_none());
+        assert_eq!(app.selected_wallet().entries[0].amount_cents, 1_000);
+        assert_eq!(app.pending_ledger_edit_focus, Some(0));
+    }
+
+    #[test]
+    fn a_locked_parent_cannot_start_or_commit_a_correction() {
+        let (mut app, _dir) = app_with_entries();
+        app.parent_unlocked = false;
+
+        app.begin_entry_edit(0);
+        assert!(app.entry_edit.is_none());
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert_eq!(app.selected_wallet().entries[0].amount_cents, 1_000);
+    }
+
+    #[test]
+    fn switching_wallets_drops_a_pending_correction_undo() {
+        let (mut app, _dir) = app_with_entries();
+        app.data.wallets.push(Wallet {
+            child_name: "Second".to_owned(),
+            starting_balance_cents: 0,
+            entries: Vec::new(),
+        });
+
+        app.begin_entry_edit(0);
+        app.draft.amount = "11.00".to_owned();
+        app.commit_entry_edit();
+        assert!(app.undo.is_some());
+
+        app.select_wallet(1);
+        assert!(
+            app.undo.is_none(),
+            "undo after a wallet switch would restore into the wrong ledger"
+        );
+    }
+
+    #[test]
+    fn a_correction_that_changes_nothing_is_a_no_op() {
+        let (mut app, _dir) = app_with_entries();
+        let before = app.selected_wallet().entries.clone();
+
+        app.begin_entry_edit(0);
+        app.commit_entry_edit();
+
+        assert_eq!(app.selected_wallet().entries, before);
+        assert!(app.undo.is_none());
+        assert!(app.entry_edit.is_none());
     }
 
     #[test]

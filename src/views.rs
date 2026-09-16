@@ -733,18 +733,15 @@ impl CofferlyApp {
                                     {
                                         self.remove_latest_entry();
                                     }
-                                    if let Some(removable) = &self.undo {
-                                        let enabled = self
-                                            .data
-                                            .wallets
-                                            .get(removable.wallet_index)
-                                            .is_some();
+                                    if let Some((wallet_index, amount_cents)) = self.pending_undo_summary() {
+                                        let enabled =
+                                            self.data.wallets.get(wallet_index).is_some();
                                         if ui
                                             .add_enabled(
                                                 enabled,
                                                 egui::Button::new(format!(
                                                     "Undo {}",
-                                                    format_money(removable.entry.amount_cents)
+                                                    format_money(amount_cents)
                                                 ))
                                                 .min_size(egui::vec2(116.0, 36.0)),
                                             )
@@ -965,19 +962,29 @@ impl CofferlyApp {
                     ui.memory_mut(|memory| memory.request_focus(crate::entry_field_id(field)));
                 }
 
+                let editing = self.entry_edit.is_some();
+
                 ui.label(
-                    egui::RichText::new("Add a transaction")
-                        .strong()
-                        .size(15.0)
-                        .color(theme::TEXT_PRIMARY),
+                    egui::RichText::new(if editing {
+                        "Correct an entry"
+                    } else {
+                        "Add a transaction"
+                    })
+                    .strong()
+                    .size(15.0)
+                    .color(theme::TEXT_PRIMARY),
                 );
                 ui.label(
-                    egui::RichText::new("Record money in or money out")
-                        .size(12.0)
-                        .color(theme::TEXT_SECONDARY),
+                    egui::RichText::new(if editing {
+                        "Fix the amount, description, or date — the ledger updates in place"
+                    } else {
+                        "Record money in or money out"
+                    })
+                    .size(12.0)
+                    .color(theme::TEXT_SECONDARY),
                 );
 
-                if let Some(deposit) = self.selected_wallet().latest_deposit() {
+                if let Some(deposit) = self.selected_wallet().latest_deposit().filter(|_| !editing) {
                     let label = format!(
                         "Repeat last deposit ({})",
                         format_money(deposit.amount_cents)
@@ -1110,6 +1117,7 @@ impl CofferlyApp {
 
                 let awaiting_negative_confirm = self.confirm_negative_cents.is_some()
                     && matches!(self.draft.kind, crate::data::EntryKind::Deduction);
+
                 if awaiting_negative_confirm {
                     ui.label(
                         egui::RichText::new(&self.status.text)
@@ -1117,7 +1125,13 @@ impl CofferlyApp {
                             .color(theme::NEGATIVE),
                     );
                 }
-                let action = if awaiting_negative_confirm {
+                let action = if editing {
+                    if awaiting_negative_confirm {
+                        "Save correction anyway"
+                    } else {
+                        "Save correction"
+                    }
+                } else if awaiting_negative_confirm {
                     "Record spending anyway"
                 } else {
                     match self.draft.kind {
@@ -1137,14 +1151,30 @@ impl CofferlyApp {
                     )
                     .clicked();
 
-                if awaiting_negative_confirm
+                let cancel_clicked = (editing || awaiting_negative_confirm)
                     && ui
-                        .add_sized([ui.available_width(), 32.0], egui::Button::new("Cancel"))
-                        .clicked()
-                {
-                    self.cancel_negative_spend_confirm();
+                        .add_sized(
+                            [ui.available_width(), 32.0],
+                            egui::Button::new(if editing {
+                                "Cancel correction"
+                            } else {
+                                "Cancel"
+                            }),
+                        )
+                        .clicked();
+
+                if cancel_clicked {
+                    if editing {
+                        self.cancel_entry_edit();
+                    } else {
+                        self.cancel_negative_spend_confirm();
+                    }
                 } else if clicked || enter_submit {
-                    self.add_entry();
+                    if editing {
+                        self.commit_entry_edit();
+                    } else {
+                        self.add_entry();
+                    }
                 }
             });
     }
@@ -1155,6 +1185,16 @@ impl CofferlyApp {
         // deep copy) so we do not hold a borrow across the TableBuilder, which
         // may need &mut self.
         let rows = self.cached_ledger_rows();
+        let parent_unlocked = self.parent_unlocked;
+        let editing_entry = self
+            .entry_edit
+            .as_ref()
+            .filter(|session| session.wallet_index == self.selected_wallet)
+            .map(|session| session.entry_index);
+        // Focus goes back to the row a correction came from once it is saved or
+        // cancelled, rather than being dropped wherever the form left it.
+        let focus_edit_row = self.pending_ledger_edit_focus.take();
+        let mut edit_request: Option<usize> = None;
         let mut toggle_sort = false;
         const ROW_HEIGHT: f32 = 42.0;
         let query = self.ledger_filter.trim().to_owned();
@@ -1216,6 +1256,7 @@ impl CofferlyApp {
             .column(egui_extras::Column::remainder().at_least(160.0))
             .column(egui_extras::Column::initial(100.0).at_least(82.0))
             .column(egui_extras::Column::initial(110.0).at_least(90.0))
+            .column(egui_extras::Column::initial(64.0).at_least(56.0))
             .header(34.0, |mut header| {
                 header.col(|ui| {
                     let tooltip = match ledger_sort {
@@ -1278,6 +1319,14 @@ impl CofferlyApp {
                             .color(theme::TEXT_PRIMARY),
                     );
                 });
+                header.col(|ui| {
+                    ui.label(
+                        egui::RichText::new("Fix")
+                            .strong()
+                            .size(12.0)
+                            .color(theme::TEXT_PRIMARY),
+                    );
+                });
             })
             .body(|body| {
                 // Virtualized rows: only visible rows are laid out each frame.
@@ -1329,6 +1378,46 @@ impl CofferlyApp {
                                 .color(balance_color(ledger_row.balance_cents)),
                         );
                     });
+                    row.col(|ui| {
+                        // The starting balance is set in Settings, not here, so
+                        // that row has nothing to correct.
+                        let Some(entry_index) = ledger_row.entry_index else {
+                            return;
+                        };
+                        let being_edited = editing_entry == Some(entry_index);
+                        let response = ui.add_enabled(
+                            parent_unlocked && !being_edited,
+                            egui::Button::new(egui::RichText::new("Edit").size(11.0))
+                                .min_size(egui::vec2(48.0, 22.0)),
+                        );
+                        let response = response.on_hover_text(if parent_unlocked {
+                            "Correct this entry's amount, description, or date"
+                        } else {
+                            "Unlock parent mode to correct entries"
+                        });
+                        let response = response.on_disabled_hover_text(if being_edited {
+                            "This entry is open in the form below"
+                        } else {
+                            "Unlock parent mode to correct entries"
+                        });
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                parent_unlocked && !being_edited,
+                                format!(
+                                    "Edit entry {}: {}",
+                                    ledger_row.date.label(),
+                                    ledger_row.description
+                                ),
+                            )
+                        });
+                        if focus_edit_row == Some(entry_index) {
+                            response.request_focus();
+                        }
+                        if response.clicked() {
+                            edit_request = Some(entry_index);
+                        }
+                    });
                 });
             });
 
@@ -1345,6 +1434,10 @@ impl CofferlyApp {
         if toggle_sort {
             self.ledger_sort.toggle();
             self.invalidate_ledger_cache();
+        }
+
+        if let Some(entry_index) = edit_request {
+            self.begin_entry_edit(entry_index);
         }
     }
 }
