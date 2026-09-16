@@ -25,7 +25,7 @@ pub struct Wallet {
     pub entries: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub date: NaiveDate,
     pub description: String,
@@ -79,6 +79,10 @@ pub struct LedgerRow<'a> {
     pub description: &'a str,
     pub amount_cents: i64,
     pub balance_cents: i64,
+    /// Index into `Wallet::entries`, or `None` for the synthetic starting-balance
+    /// row. Rows are sorted and filtered for display, so this is what lets the UI
+    /// point back at the entry a row came from (e.g. to correct it).
+    pub entry_index: Option<usize>,
 }
 
 /// Owned ledger row for UI caching (avoids rebuilding borrows every frame).
@@ -88,6 +92,8 @@ pub struct OwnedLedgerRow {
     pub description: String,
     pub amount_cents: i64,
     pub balance_cents: i64,
+    /// See `LedgerRow::entry_index`.
+    pub entry_index: Option<usize>,
 }
 
 impl OwnedLedgerRow {
@@ -97,6 +103,7 @@ impl OwnedLedgerRow {
             description: row.description.to_owned(),
             amount_cents: row.amount_cents,
             balance_cents: row.balance_cents,
+            entry_index: row.entry_index,
         }
     }
 }
@@ -128,15 +135,17 @@ impl Wallet {
             description: STARTING_BALANCE_DESCRIPTION,
             amount_cents: self.starting_balance_cents,
             balance_cents: self.starting_balance_cents,
+            entry_index: None,
         });
 
-        for entry in &self.entries {
+        for (index, entry) in self.entries.iter().enumerate() {
             balance = clamp_cents(balance.saturating_add(entry.amount_cents));
             rows.push(LedgerRow {
                 date: LedgerRowDate::Entry(entry.date),
                 description: &entry.description,
                 amount_cents: entry.amount_cents,
                 balance_cents: balance,
+                entry_index: Some(index),
             });
         }
 
