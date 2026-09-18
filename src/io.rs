@@ -117,38 +117,29 @@ pub fn save_encrypted(
 }
 
 fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-
     let parent = path
         .parent()
         .ok_or_else(|| format!("Could not find parent folder for {}", path.display()))?;
-    let mut temp_file = tempfile::NamedTempFile::new_in(parent).map_err(|err| err.to_string())?;
-    temp_file
-        .write_all(contents)
-        .map_err(|err| err.to_string())?;
-    temp_file
-        .as_file_mut()
-        .sync_all()
-        .map_err(|err| err.to_string())?;
-    temp_file
+    synced_temp_file(parent, contents)?
         .persist(path)
         .map_err(|err| err.error.to_string())?;
-
     Ok(())
 }
 
 /// Create a new file atomically without replacing a file another process may
 /// have created after our existence check.
 fn write_new_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-
     let parent = path
         .parent()
         .ok_or_else(|| format!("Could not find parent folder for {}", path.display()))?;
+    synced_temp_file(parent, contents)?
+        .persist_noclobber(path)
+        .map_err(|err| err.error.to_string())?;
+    Ok(())
+}
+
+fn synced_temp_file(parent: &Path, contents: &[u8]) -> Result<tempfile::NamedTempFile, String> {
+    fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent).map_err(|err| err.to_string())?;
     temp_file
         .write_all(contents)
@@ -157,11 +148,7 @@ fn write_new_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
         .as_file_mut()
         .sync_all()
         .map_err(|err| err.to_string())?;
-    temp_file
-        .persist_noclobber(path)
-        .map_err(|err| err.error.to_string())?;
-
-    Ok(())
+    Ok(temp_file)
 }
 
 /// Reserves a fresh, unpredictably-named temp file for family data (ledger
@@ -326,6 +313,18 @@ mod tests {
         write_atomically(&path, b"second").unwrap();
 
         assert_eq!(load_raw(&path).unwrap().unwrap(), b"second");
+    }
+
+    #[test]
+    fn write_new_atomically_refuses_to_clobber_existing_file() {
+        let test_dir = tempdir().unwrap();
+        let path = test_dir.path().join("data.bin");
+        fs::write(&path, b"original").unwrap();
+
+        let error = write_new_atomically(&path, b"replacement").unwrap_err();
+
+        assert!(!error.is_empty());
+        assert_eq!(fs::read(&path).unwrap(), b"original");
     }
 
     #[test]
