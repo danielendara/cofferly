@@ -8,8 +8,7 @@
 use eframe::egui;
 
 use crate::data::{
-    count_ledger_filter_entry_matches, description_length_accessible_name,
-    description_length_label, filter_ledger_rows, sum_ledger_filter_entry_amounts,
+    description_length_accessible_name, description_length_label, ledger_filter_summary,
     valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
@@ -1198,9 +1197,10 @@ impl CofferlyApp {
         let mut toggle_sort = false;
         const ROW_HEIGHT: f32 = 42.0;
         let query = self.ledger_filter.trim().to_owned();
-        let filtered_rows = filter_ledger_rows(&rows, &self.ledger_filter);
-        let matching_entry_count = count_ledger_filter_entry_matches(&rows, &self.ledger_filter);
-        let matching_net_cents = sum_ledger_filter_entry_amounts(&rows, &self.ledger_filter);
+        let summary = ledger_filter_summary(&rows, &self.ledger_filter);
+        let filtered_rows = summary.rows;
+        let matching_entry_count = summary.matching_entry_count;
+        let matching_net_cents = summary.matching_net_cents;
         let no_matches = !query.is_empty() && matching_entry_count == 0;
 
         ui.horizontal(|ui| {
@@ -1227,7 +1227,7 @@ impl CofferlyApp {
 
             if !self.ledger_filter.is_empty() {
                 ui.label(
-                    egui::RichText::new(format!("{matching_entry_count} matching"))
+                    egui::RichText::new(format_ledger_filter_match_count(matching_entry_count))
                         .size(12.0)
                         .color(theme::TEXT_SECONDARY),
                 );
@@ -1453,6 +1453,10 @@ fn draw_story_icon(ui: &egui::Ui, texture: &egui::TextureHandle, rect: egui::Rec
         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+fn format_ledger_filter_match_count(count: usize) -> String {
+    format!("{count} matching")
 }
 
 fn format_ledger_filter_net(amount_cents: i64) -> String {
@@ -1710,6 +1714,87 @@ mod ledger_amount_a11y_tests {
         assert_eq!(format_ledger_filter_net(1_200), "net +$12.00");
         assert_eq!(format_ledger_filter_net(-500), "net −$5.00");
         assert_eq!(format_ledger_filter_net(0), "net $0.00");
+    }
+
+    #[test]
+    fn ledger_table_filter_chrome_matches_summary_for_the_same_input() {
+        use crate::data::{Entry, Wallet};
+        use chrono::NaiveDate;
+
+        let wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 1000,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Weekly allowance".to_owned(),
+                    amount_cents: 500,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                    description: "Snack".to_owned(),
+                    amount_cents: -200,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                    description: "Birthday gift".to_owned(),
+                    amount_cents: 2500,
+                },
+            ],
+        };
+        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+
+        let cases: &[(&str, &[&str], &str, &str)] = &[
+            (
+                "",
+                &[
+                    "Starting balance",
+                    "Weekly allowance",
+                    "Snack",
+                    "Birthday gift",
+                ],
+                "3 matching",
+                "net +$28.00",
+            ),
+            (
+                "ALLOW",
+                &["Starting balance", "Weekly allowance"],
+                "1 matching",
+                "net +$5.00",
+            ),
+            (
+                "nonexistent",
+                &["Starting balance"],
+                "0 matching",
+                "net $0.00",
+            ),
+            (
+                "snack",
+                &["Starting balance", "Snack"],
+                "1 matching",
+                "net −$2.00",
+            ),
+        ];
+
+        for &(query, expected_rows, expected_count, expected_net) in cases {
+            let summary = ledger_filter_summary(&rows, query);
+            let descriptions: Vec<_> = summary
+                .rows
+                .iter()
+                .map(|row| row.description.as_str())
+                .collect();
+            assert_eq!(descriptions, expected_rows, "rows for {query:?}");
+            assert_eq!(
+                format_ledger_filter_match_count(summary.matching_entry_count),
+                expected_count,
+                "count for {query:?}"
+            );
+            assert_eq!(
+                format_ledger_filter_net(summary.matching_net_cents),
+                expected_net,
+                "net for {query:?}"
+            );
+        }
     }
 
     #[test]

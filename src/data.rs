@@ -231,6 +231,7 @@ impl Wallet {
 /// make an empty-looking table ambiguous with the "no matches" case.
 ///
 /// An empty (or whitespace-only) query matches every row.
+#[cfg(test)]
 pub fn filter_ledger_rows<'a>(rows: &'a [OwnedLedgerRow], query: &str) -> Vec<&'a OwnedLedgerRow> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -245,23 +246,45 @@ pub fn filter_ledger_rows<'a>(rows: &'a [OwnedLedgerRow], query: &str) -> Vec<&'
         .collect()
 }
 
-/// Entry rows (excluding the starting-balance row) that match a ledger
-/// description filter. Delegates to [`filter_ledger_rows`].
-pub fn count_ledger_filter_entry_matches(rows: &[OwnedLedgerRow], query: &str) -> usize {
-    filter_ledger_rows(rows, query)
-        .iter()
-        .filter(|row| !matches!(row.date, LedgerRowDate::Start))
-        .count()
+/// Filtered ledger rows plus the match count and net used by the table chrome.
+///
+/// `rows` follows [`filter_ledger_rows`] (starting-balance row always kept).
+/// `matching_entry_count` and `matching_net_cents` exclude that start row.
+#[derive(Debug)]
+pub struct LedgerFilterSummary<'a> {
+    pub rows: Vec<&'a OwnedLedgerRow>,
+    pub matching_entry_count: usize,
+    pub matching_net_cents: i64,
 }
 
-/// Signed sum of matching entry amounts (excluding the starting-balance row).
-/// Delegates to [`filter_ledger_rows`].
-pub fn sum_ledger_filter_entry_amounts(rows: &[OwnedLedgerRow], query: &str) -> i64 {
-    filter_ledger_rows(rows, query)
-        .iter()
-        .filter(|row| !matches!(row.date, LedgerRowDate::Start))
-        .map(|row| row.amount_cents)
-        .sum()
+/// Walks `rows` once: same filter as [`filter_ledger_rows`], plus the entry
+/// count and signed net the ledger table shows beside Clear.
+pub fn ledger_filter_summary<'a>(
+    rows: &'a [OwnedLedgerRow],
+    query: &str,
+) -> LedgerFilterSummary<'a> {
+    let query = query.trim().to_lowercase();
+    let keep_all = query.is_empty();
+    let mut filtered = Vec::new();
+    let mut matching_entry_count = 0;
+    let mut matching_net_cents = 0;
+
+    for row in rows {
+        let is_start = matches!(row.date, LedgerRowDate::Start);
+        if keep_all || is_start || row.description.to_lowercase().contains(&query) {
+            filtered.push(row);
+            if !is_start {
+                matching_entry_count += 1;
+                matching_net_cents += row.amount_cents;
+            }
+        }
+    }
+
+    LedgerFilterSummary {
+        rows: filtered,
+        matching_entry_count,
+        matching_net_cents,
+    }
 }
 
 fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
@@ -613,24 +636,74 @@ mod tests {
     }
 
     #[test]
-    fn count_ledger_filter_entry_matches_excludes_starting_balance_row() {
+    fn ledger_filter_summary_is_a_single_pass_over_filter_count_and_net() {
         let wallet = filter_test_wallet();
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 
-        assert_eq!(count_ledger_filter_entry_matches(&rows, ""), 3);
-        assert_eq!(count_ledger_filter_entry_matches(&rows, "allow"), 1);
-        assert_eq!(count_ledger_filter_entry_matches(&rows, "nonexistent"), 0);
-    }
+        struct Case {
+            query: &'static str,
+            descriptions: &'static [&'static str],
+            matching_entry_count: usize,
+            matching_net_cents: i64,
+        }
 
-    #[test]
-    fn sum_ledger_filter_entry_amounts_excludes_starting_balance_row() {
-        let wallet = filter_test_wallet();
-        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        let cases = [
+            Case {
+                query: "",
+                descriptions: &[
+                    "Starting balance",
+                    "Weekly allowance",
+                    "Snack",
+                    "Birthday gift",
+                ],
+                matching_entry_count: 3,
+                matching_net_cents: 2_800,
+            },
+            Case {
+                query: "ALLOW",
+                descriptions: &["Starting balance", "Weekly allowance"],
+                matching_entry_count: 1,
+                matching_net_cents: 500,
+            },
+            Case {
+                query: "snack",
+                descriptions: &["Starting balance", "Snack"],
+                matching_entry_count: 1,
+                matching_net_cents: -200,
+            },
+            Case {
+                query: "nonexistent",
+                descriptions: &["Starting balance"],
+                matching_entry_count: 0,
+                matching_net_cents: 0,
+            },
+        ];
 
-        assert_eq!(sum_ledger_filter_entry_amounts(&rows, ""), 2_800);
-        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "allow"), 500);
-        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "snack"), -200);
-        assert_eq!(sum_ledger_filter_entry_amounts(&rows, "nonexistent"), 0);
+        for case in cases {
+            let summary = ledger_filter_summary(&rows, case.query);
+            let descriptions: Vec<_> = summary
+                .rows
+                .iter()
+                .map(|row| row.description.as_str())
+                .collect();
+
+            assert_eq!(descriptions, case.descriptions, "rows for {:?}", case.query);
+            assert_eq!(
+                summary.matching_entry_count, case.matching_entry_count,
+                "count for {:?}",
+                case.query
+            );
+            assert_eq!(
+                summary.matching_net_cents, case.matching_net_cents,
+                "net for {:?}",
+                case.query
+            );
+            assert!(
+                matches!(summary.rows[0].date, LedgerRowDate::Start),
+                "start row missing for {:?}",
+                case.query
+            );
+        }
     }
 
     #[test]
