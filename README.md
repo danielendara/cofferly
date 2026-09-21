@@ -166,6 +166,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 Repository protection recommendations are documented in [docs/GITHUB_SETTINGS.md](docs/GITHUB_SETTINGS.md).
 
+## Third-party assets
+
+Story icons in `assets/story-icons/` are [Twemoji](https://github.com/twitter/twemoji) (CC-BY 4.0). See [assets/story-icons/LICENSE.txt](assets/story-icons/LICENSE.txt).
+
 ## License
 
 MIT
