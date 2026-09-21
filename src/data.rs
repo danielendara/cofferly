@@ -219,37 +219,7 @@ impl Wallet {
     }
 }
 
-/// Narrows already-sorted ledger rows to those matching a case-insensitive
-/// description substring search, for the ledger table's local filter
-/// (issue #139). Purely a display-level view over `rows`: it never touches
-/// `Wallet::entries` and preserves the input order (i.e. whatever sort was
-/// already applied), it only omits non-matching entries.
-///
-/// The starting-balance row is exempt from the filter and always kept,
-/// per the issue's stated preference ("always show start row") -- it isn't
-/// a real transaction a parent would be searching for, and hiding it would
-/// make an empty-looking table ambiguous with the "no matches" case.
-///
-/// An empty (or whitespace-only) query matches every row.
-#[cfg(test)]
-pub fn filter_ledger_rows<'a>(rows: &'a [OwnedLedgerRow], query: &str) -> Vec<&'a OwnedLedgerRow> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
-        return rows.iter().collect();
-    }
-
-    rows.iter()
-        .filter(|row| {
-            matches!(row.date, LedgerRowDate::Start)
-                || row.description.to_lowercase().contains(&query)
-        })
-        .collect()
-}
-
-/// Filtered ledger rows plus the match count and net used by the table chrome.
-///
-/// `rows` follows [`filter_ledger_rows`] (starting-balance row always kept).
-/// `matching_entry_count` and `matching_net_cents` exclude that start row.
+/// Filtered ledger rows plus match count and net for the ledger table chrome.
 #[derive(Debug)]
 pub struct LedgerFilterSummary<'a> {
     pub rows: Vec<&'a OwnedLedgerRow>,
@@ -257,8 +227,18 @@ pub struct LedgerFilterSummary<'a> {
     pub matching_net_cents: i64,
 }
 
-/// Walks `rows` once: same filter as [`filter_ledger_rows`], plus the entry
-/// count and signed net the ledger table shows beside Clear.
+/// Narrows already-sorted ledger rows for the table's local description filter
+/// (issue #139) in one pass. Purely display-level: never touches
+/// `Wallet::entries`, preserves input order, and only omits non-matching
+/// entries.
+///
+/// Case-insensitive substring match on `description`. An empty or
+/// whitespace-only query keeps every row. The starting-balance row is always
+/// kept (even when nothing else matches) so an filtered table is never
+/// confused with having no ledger at all.
+///
+/// `matching_entry_count` and `matching_net_cents` count only real entries,
+/// not the start row.
 pub fn ledger_filter_summary<'a>(
     rows: &'a [OwnedLedgerRow],
     query: &str,
@@ -577,65 +557,6 @@ mod tests {
     }
 
     #[test]
-    fn filter_ledger_rows_with_empty_query_returns_every_row_unchanged() {
-        let wallet = filter_test_wallet();
-        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-
-        let filtered = filter_ledger_rows(&rows, "");
-        let descriptions: Vec<_> = filtered
-            .iter()
-            .map(|row| row.description.as_str())
-            .collect();
-
-        assert_eq!(
-            descriptions,
-            [
-                "Starting balance",
-                "Weekly allowance",
-                "Snack",
-                "Birthday gift"
-            ]
-        );
-    }
-
-    #[test]
-    fn filter_ledger_rows_narrows_to_case_insensitive_substring_matches() {
-        let wallet = filter_test_wallet();
-        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-
-        let filtered = filter_ledger_rows(&rows, "ALLOW");
-        let descriptions: Vec<_> = filtered
-            .iter()
-            .map(|row| row.description.as_str())
-            .collect();
-
-        // The starting-balance row is always kept alongside whatever entries match.
-        assert_eq!(descriptions, ["Starting balance", "Weekly allowance"]);
-    }
-
-    #[test]
-    fn filter_ledger_rows_always_keeps_the_starting_balance_row() {
-        let wallet = filter_test_wallet();
-        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-
-        // A query that matches zero entries still keeps the start row.
-        let filtered = filter_ledger_rows(&rows, "nonexistent description");
-
-        assert_eq!(filtered.len(), 1);
-        assert!(matches!(filtered[0].date, LedgerRowDate::Start));
-    }
-
-    #[test]
-    fn filter_ledger_rows_treats_whitespace_only_query_as_empty() {
-        let wallet = filter_test_wallet();
-        let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-
-        let filtered = filter_ledger_rows(&rows, "   ");
-
-        assert_eq!(filtered.len(), rows.len());
-    }
-
-    #[test]
     fn ledger_filter_summary_is_a_single_pass_over_filter_count_and_net() {
         let wallet = filter_test_wallet();
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
@@ -676,6 +597,17 @@ mod tests {
                 descriptions: &["Starting balance"],
                 matching_entry_count: 0,
                 matching_net_cents: 0,
+            },
+            Case {
+                query: "   ",
+                descriptions: &[
+                    "Starting balance",
+                    "Weekly allowance",
+                    "Snack",
+                    "Birthday gift",
+                ],
+                matching_entry_count: 3,
+                matching_net_cents: 2_800,
             },
         ];
 
