@@ -7,7 +7,7 @@ Use this checklist when preparing a Cofferly release.
 ```powershell
 cargo fmt -- --check
 cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --locked -- -D warnings
 cargo build --release
 .\scripts\package-windows.ps1 -Version 0.3.0
 ```
