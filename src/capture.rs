@@ -357,13 +357,19 @@ mod tests {
     }
 
     #[test]
-    fn capture_script_lists_story_setup_and_keeps_one_target_per_process() {
+    fn capture_script_lists_readme_screenshots_and_keeps_one_target_per_process() {
         let script = include_str!("../scripts/capture-screenshots.sh");
-        assert!(script.contains("story-setup"));
-        assert!(script.contains("cofferly-story-setup.png"));
+        assert!(script.contains("cofferly-story-unlock.png"));
+        assert!(script.contains("cofferly-wallet-screen.png"));
+        assert!(script.contains("cofferly-settings-screen.png"));
+        assert!(!script.contains("cofferly-story-setup.png"));
         assert!(script.contains("One target per process"));
-        assert!(script
-            .lines()
-            .any(|line| line.contains("for target in") && line.contains("story-setup")));
+        assert!(script.lines().any(|line| {
+            line.contains("for target in")
+                && line.contains("story-unlock")
+                && line.contains("wallet")
+                && line.contains("settings")
+                && !line.contains("story-setup")
+        }));
     }
 }

@@ -12,7 +12,7 @@
 
 ### Docs
 
-- `COFFERLY_CAPTURE=story-setup` (alias `recovery-card`) writes `cofferly-story-setup.png`. `scripts/capture-screenshots.sh` still runs one target per process.
+- `scripts/capture-screenshots.sh` refreshes the three README screenshots under `docs/screenshots/` (one `COFFERLY_CAPTURE` target per process).
 
 ### Accessibility
 
