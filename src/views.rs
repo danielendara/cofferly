@@ -1745,26 +1745,10 @@ mod ledger_amount_a11y_tests {
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 
         let cases: &[(&str, &str, &str)] = &[
-            (
-                "",
-                "3 matching",
-                "net +$28.00",
-            ),
-            (
-                "ALLOW",
-                "1 matching",
-                "net +$5.00",
-            ),
-            (
-                "nonexistent",
-                "0 matching",
-                "net $0.00",
-            ),
-            (
-                "snack",
-                "1 matching",
-                "net −$2.00",
-            ),
+            ("", "3 matching", "net +$28.00"),
+            ("ALLOW", "1 matching", "net +$5.00"),
+            ("nonexistent", "0 matching", "net $0.00"),
+            ("snack", "1 matching", "net −$2.00"),
         ];
 
         for &(query, expected_count, expected_net) in cases {
