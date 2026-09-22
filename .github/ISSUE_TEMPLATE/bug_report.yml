@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: Cofferly version
-      placeholder: "0.2.0"
+      placeholder: "e.g. 0.3.0"
   - type: textarea
     id: steps
     attributes:
