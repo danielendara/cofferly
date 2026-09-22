@@ -1,12 +1,23 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::data::{LedgerSort, Wallet};
+use crate::data::{ledger_filter_summary, LedgerSort, Wallet};
 use crate::money::format_money_input;
 
 /// Write a UTF-8 CSV ledger (with BOM for Excel) to `path`.
 /// Amounts are unformatted decimals so spreadsheets can sum them.
 pub fn write_csv_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
+    write_csv_ledger_filtered(path, wallets, "")
+}
+
+/// Like [`write_csv_ledger`], but a non-empty `description_filter` keeps only
+/// the rows [`ledger_filter_summary`] would show (including the start row).
+/// Order stays oldest-first. Running balances are the full ledger's.
+pub fn write_csv_ledger_filtered(
+    path: &PathBuf,
+    wallets: &[Wallet],
+    description_filter: &str,
+) -> Result<PathBuf, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
@@ -15,12 +26,14 @@ pub fn write_csv_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, S
     csv.push_str("Wallet,Date,Description,Amount,Balance\r\n");
 
     for wallet in wallets {
-        for row in wallet.ledger_rows_sorted(LedgerSort::OldestFirst) {
+        let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        let summary = ledger_filter_summary(&owned_rows, description_filter);
+        for row in summary.rows {
             csv.push_str(&csv_text_field(&wallet.child_name));
             csv.push(',');
             csv.push_str(&csv_text_field(&row.date.label()));
             csv.push(',');
-            csv.push_str(&csv_text_field(row.description));
+            csv.push_str(&csv_text_field(&row.description));
             csv.push(',');
             csv.push_str(&csv_number_field(&format_money_input(row.amount_cents)));
             csv.push(',');
@@ -133,5 +146,70 @@ mod tests {
             );
         }
         assert_eq!(csv_text_field("plain text"), "plain text");
+    }
+
+    #[test]
+    fn filtered_csv_keeps_start_row_full_balance_and_oldest_first_order() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.csv");
+        let wallets = vec![
+            Wallet {
+                child_name: "Child 1".to_owned(),
+                starting_balance_cents: 1_000,
+                entries: vec![
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                        description: "Snack early".to_owned(),
+                        amount_cents: -200,
+                    },
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                        description: "Weekly allowance".to_owned(),
+                        amount_cents: 1_000,
+                    },
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                        description: "Snack late".to_owned(),
+                        amount_cents: -100,
+                    },
+                ],
+            },
+            Wallet {
+                child_name: "Child 2".to_owned(),
+                starting_balance_cents: 0,
+                entries: vec![Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
+                    description: "Bus fare".to_owned(),
+                    amount_cents: -300,
+                }],
+            },
+        ];
+
+        let csv = std::fs::read_to_string(
+            write_csv_ledger_filtered(&path, &wallets[..1], "SNACK").unwrap(),
+        )
+        .unwrap();
+        assert!(csv.contains("Starting balance"));
+        assert!(csv.contains("Snack early"));
+        assert!(csv.contains("Snack late"));
+        assert!(!csv.contains("Weekly allowance"));
+        assert!(csv.contains(",17.00"));
+        assert!(!csv.contains(",7.00"));
+        assert!(csv.find("Snack early").unwrap() < csv.find("Snack late").unwrap());
+        assert!(!csv.contains("Child 2"));
+
+        let all_path = dir.path().join("all.csv");
+        let all = std::fs::read_to_string(write_csv_ledger(&all_path, &wallets).unwrap()).unwrap();
+        assert!(all.contains("Weekly allowance"));
+        assert!(all.contains("Child 2"));
+        assert!(all.contains("Bus fare"));
+
+        let empty = dir.path().join("empty-filter.csv");
+        let unfiltered = std::fs::read_to_string(
+            write_csv_ledger_filtered(&empty, &wallets[..1], "  ").unwrap(),
+        )
+        .unwrap();
+        assert!(unfiltered.contains("Weekly allowance"));
+        assert!(unfiltered.contains("Snack early"));
     }
 }

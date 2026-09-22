@@ -1,11 +1,22 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::data::{LedgerSort, Wallet};
+use crate::data::{ledger_filter_summary, LedgerSort, Wallet};
 use crate::money::format_money;
 
 /// Write a printable HTML ledger to `path` (typically under the OS temp directory).
 pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
+    write_printable_ledger_filtered(path, wallets, "")
+}
+
+/// Like [`write_printable_ledger`], but a non-empty `description_filter` keeps
+/// only the rows [`ledger_filter_summary`] would show (including the start
+/// row). Order stays oldest-first. Running balances are the full ledger's.
+pub fn write_printable_ledger_filtered(
+    path: &PathBuf,
+    wallets: &[Wallet],
+    description_filter: &str,
+) -> Result<PathBuf, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
@@ -23,11 +34,13 @@ pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<Path
             "<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Balance</th></tr></thead><tbody>",
         );
 
-        for ledger_row in wallet.ledger_rows_sorted(LedgerSort::OldestFirst) {
+        let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        let summary = ledger_filter_summary(&owned_rows, description_filter);
+        for ledger_row in summary.rows {
             let row = format!(
                 "<tr><td>{}</td><td>{}</td><td class=\"{}\">{}</td><td>{}</td></tr>",
                 ledger_row.date.label(),
-                escape_html(ledger_row.description),
+                escape_html(&ledger_row.description),
                 if ledger_row.amount_cents < 0 {
                     "minus"
                 } else {
@@ -154,5 +167,69 @@ mod tests {
         assert!(html.contains("-$7.50"));
         assert!(html.contains("$12.50"));
         assert!(html.contains("window.print()"));
+    }
+
+    #[test]
+    fn filtered_printable_ledger_keeps_start_row_and_full_running_balance() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.html");
+        let wallets = sample_wallets();
+
+        let written = write_printable_ledger_filtered(&path, &wallets[..1], "snack").unwrap();
+        let html = std::fs::read_to_string(&written).unwrap();
+
+        assert!(html.contains("Starting balance"));
+        assert!(html.contains("Snack early"));
+        assert!(html.contains("Snack late"));
+        assert!(!html.contains("Weekly allowance"));
+        // Full-ledger balance after the later snack, not a balance recomputed
+        // from the filtered rows alone ($10.00 - $2.00 - $1.00 = $7.00).
+        assert!(html.contains("Snack late</td><td class=\"minus\">-$1.00</td><td>$17.00</td>"));
+        assert!(!html.contains("$7.00"));
+        assert!(html.find("Snack early").unwrap() < html.find("Snack late").unwrap());
+        // Other wallets are only included when the caller passes them.
+        assert!(!html.contains("Child 2"));
+
+        let all = dir.path().join("all.html");
+        let all_html =
+            std::fs::read_to_string(write_printable_ledger(&all, &wallets).unwrap()).unwrap();
+        assert!(all_html.contains("Weekly allowance"));
+        assert!(all_html.contains("Child 2"));
+        assert!(all_html.contains("Bus fare"));
+    }
+
+    fn sample_wallets() -> Vec<Wallet> {
+        vec![
+            Wallet {
+                child_name: "Child 1".to_owned(),
+                starting_balance_cents: 1_000,
+                entries: vec![
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                        description: "Snack early".to_owned(),
+                        amount_cents: -200,
+                    },
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                        description: "Weekly allowance".to_owned(),
+                        amount_cents: 1_000,
+                    },
+                    Entry {
+                        date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                        description: "Snack late".to_owned(),
+                        amount_cents: -100,
+                    },
+                ],
+            },
+            Wallet {
+                child_name: "Child 2".to_owned(),
+                starting_balance_cents: 0,
+                entries: vec![Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
+                    description: "Bus fare".to_owned(),
+                    amount_cents: -300,
+                }],
+            },
+        ]
     }
 }

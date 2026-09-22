@@ -36,16 +36,17 @@ const UI_STATE_KEY: &str = "cofferly/ui_state";
 
 use crypto::SessionCrypto;
 use data::{
-    default_app_data, format_ledger_date, parse_ledger_date, valid_cents, valid_child_name,
-    valid_description, AppData, Entry, EntryKind, LedgerSort, OwnedLedgerRow, Wallet,
+    default_app_data, format_ledger_date, ledger_filter_summary, parse_ledger_date, valid_cents,
+    valid_child_name, valid_description, AppData, Entry, EntryKind, LedgerSort, OwnedLedgerRow,
+    Wallet,
 };
-use export_csv::write_csv_ledger;
+use export_csv::{write_csv_ledger, write_csv_ledger_filtered};
 use io::{
     cleanup_temp_print_artifacts, data_path, prepare_data_vault, reserve_private_temp_path,
     save_encrypted,
 };
 use money::{format_money, format_money_input, parse_dollars_to_cents};
-use print_html::{ledger_file_stem, write_printable_ledger};
+use print_html::{ledger_file_stem, write_printable_ledger, write_printable_ledger_filtered};
 use theme::{
     app_icon, balance_color, configure_style, wallet_card_chrome, WALLET_CARD_HEIGHT,
     WALLET_PICKER_WIDTH,
@@ -1893,8 +1894,13 @@ impl CofferlyApp {
             self.set_status_err("Could not create printable ledger: temp file unavailable.");
             return;
         };
-        match write_printable_ledger(&path, &[self.selected_wallet().clone()]) {
-            Ok(path) => self.open_export_file(path, "printable ledger"),
+        let filter = self.selected_description_filter();
+        match write_printable_ledger_filtered(
+            &path,
+            &[self.selected_wallet().clone()],
+            filter.as_deref().unwrap_or(""),
+        ) {
+            Ok(path) => self.open_selected_export(path, "printable ledger", filter.as_deref()),
             Err(err) => self.set_status_err(format!("Could not create printable ledger: {err}")),
         }
     }
@@ -1909,6 +1915,7 @@ impl CofferlyApp {
             self.set_status_err("Could not create printable ledger: temp file unavailable.");
             return;
         };
+        // Full book: the selected wallet's description filter does not apply.
         match write_printable_ledger(&path, &self.data.wallets) {
             Ok(path) => self.open_export_file(path, "printable ledger"),
             Err(err) => self.set_status_err(format!("Could not create printable ledger: {err}")),
@@ -1925,8 +1932,13 @@ impl CofferlyApp {
             self.set_status_err("Could not create CSV ledger: temp file unavailable.");
             return;
         };
-        match write_csv_ledger(&path, &[self.selected_wallet().clone()]) {
-            Ok(path) => self.open_export_file(path, "CSV ledger"),
+        let filter = self.selected_description_filter();
+        match write_csv_ledger_filtered(
+            &path,
+            &[self.selected_wallet().clone()],
+            filter.as_deref().unwrap_or(""),
+        ) {
+            Ok(path) => self.open_selected_export(path, "CSV ledger", filter.as_deref()),
             Err(err) => self.set_status_err(format!("Could not create CSV ledger: {err}")),
         }
     }
@@ -1941,9 +1953,40 @@ impl CofferlyApp {
             self.set_status_err("Could not create CSV ledger: temp file unavailable.");
             return;
         };
+        // Full book: the selected wallet's description filter does not apply.
         match write_csv_ledger(&path, &self.data.wallets) {
             Ok(path) => self.open_export_file(path, "CSV ledger"),
             Err(err) => self.set_status_err(format!("Could not create CSV ledger: {err}")),
+        }
+    }
+
+    /// Trimmed description filter for the selected wallet, if it would drop rows.
+    fn selected_description_filter(&self) -> Option<String> {
+        let query = self.ledger_filter.trim();
+        if query.is_empty() {
+            None
+        } else {
+            Some(query.to_owned())
+        }
+    }
+
+    fn filtered_entry_count(&self, query: &str) -> usize {
+        let rows = self
+            .selected_wallet()
+            .ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        ledger_filter_summary(&rows, query).matching_entry_count
+    }
+
+    fn open_selected_export(&mut self, path: PathBuf, kind: &str, filter: Option<&str>) {
+        let filtered_count = filter.map(|query| self.filtered_entry_count(query));
+        let result = opener::open(&path).map_err(|err| err.to_string());
+        let opened = result.is_ok();
+        self.apply_export_open_result(path.clone(), kind, result);
+        if opened {
+            if let (Some(query), Some(count)) = (filter, filtered_count) {
+                self.status =
+                    Status::success(filtered_export_opened_status(kind, &path, query, count));
+            }
         }
     }
 
@@ -2359,6 +2402,23 @@ fn export_opener_failed_status(kind: &str, path: &Path, err: impl std::fmt::Disp
         "{kind} was saved to {}, but Cofferly could not open it ({err}). Open that file from your file manager to print or import it.",
         path.display()
     ))
+}
+
+fn filtered_export_opened_status(
+    kind: &str,
+    path: &Path,
+    filter: &str,
+    entry_count: usize,
+) -> String {
+    let entries = if entry_count == 1 {
+        "1 entry".to_owned()
+    } else {
+        format!("{entry_count} entries")
+    };
+    format!(
+        "Opened {kind} with {entries} included; description filter \"{filter}\" applied. Print or save it from the window that opened, or find it at {}.",
+        path.display()
+    )
 }
 
 /// Returns the eagerly-clamped index (a placeholder only good enough for the
@@ -4282,6 +4342,50 @@ mod app_tests {
         assert!(app.status.text.contains("could not open it"));
         assert!(app.status.text.contains("file manager"));
         assert!(app.status.text.contains("no application found"));
+    }
+
+    #[test]
+    fn selected_export_status_names_filter_and_count_only_when_set() {
+        let (mut app, _dir) = test_app();
+        app.data.wallets[0].starting_balance_cents = 1_000;
+        app.data.wallets[0].entries = vec![
+            Entry {
+                date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                description: "Weekly allowance".to_owned(),
+                amount_cents: 500,
+            },
+            Entry {
+                date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+                description: "Snack".to_owned(),
+                amount_cents: -200,
+            },
+        ];
+
+        assert!(app.selected_description_filter().is_none());
+        let plain = export_opened_status("printable ledger", Path::new("ledger.html"));
+        assert!(!plain.text.to_lowercase().contains("filter"));
+
+        app.ledger_filter = "  ".to_owned();
+        assert!(app.selected_description_filter().is_none());
+
+        app.ledger_filter = "  snack  ".to_owned();
+        let query = app.selected_description_filter().expect("active filter");
+        assert_eq!(query, "snack");
+        assert_eq!(app.filtered_entry_count(&query), 1);
+
+        let one = filtered_export_opened_status("CSV ledger", Path::new("ledger.csv"), &query, 1);
+        assert!(one.contains("snack"));
+        assert!(one.contains("1 entry"));
+        assert!(one.to_lowercase().contains("filter"));
+        assert!(one.contains("ledger.csv"));
+
+        let two =
+            filtered_export_opened_status("printable ledger", Path::new("ledger.html"), "snack", 2);
+        assert!(two.contains("2 entries"));
+        let none =
+            filtered_export_opened_status("printable ledger", Path::new("ledger.html"), "nope", 0);
+        assert!(none.contains("0 entries"));
+        assert!(none.contains("nope"));
     }
 
     #[test]
