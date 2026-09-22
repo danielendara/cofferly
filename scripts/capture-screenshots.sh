@@ -17,7 +17,7 @@ fi
 
 mkdir -p "$OUT_DIR"
 
-for target in story-unlock wallet settings story-setup; do
+for target in story-unlock wallet settings; do
   echo "Capturing ${target}..."
   data_dir="${DATA_ROOT}-${target}"
   rm -rf "$data_dir"
@@ -32,5 +32,4 @@ done
 echo "Wrote screenshots to $OUT_DIR"
 ls -la "$OUT_DIR"/cofferly-story-unlock.png \
        "$OUT_DIR"/cofferly-wallet-screen.png \
-       "$OUT_DIR"/cofferly-settings-screen.png \
-       "$OUT_DIR"/cofferly-story-setup.png
+       "$OUT_DIR"/cofferly-settings-screen.png
