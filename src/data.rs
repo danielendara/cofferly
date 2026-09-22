@@ -234,7 +234,7 @@ pub struct LedgerFilterSummary<'a> {
 ///
 /// Case-insensitive substring match on `description`. An empty or
 /// whitespace-only query keeps every row. The starting-balance row is always
-/// kept (even when nothing else matches) so an filtered table is never
+/// kept (even when nothing else matches) so a filtered table is never
 /// confused with having no ledger at all.
 ///
 /// `matching_entry_count` and `matching_net_cents` count only real entries,
