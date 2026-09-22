@@ -238,10 +238,14 @@ impl CofferlyApp {
                             } else {
                                 self.status.text.clone()
                             };
-                            ui.label(
-                                egui::RichText::new(status_text)
-                                    .size(13.0)
-                                    .color(status_color),
+                            crate::show_live_status(
+                                ui,
+                                "lock_screen_status",
+                                &status_text,
+                                status_color,
+                                13.0,
+                                false,
+                                self.status.severity,
                             );
                             ui.add_space(8.0);
                             ui.label(
@@ -474,7 +478,20 @@ impl CofferlyApp {
                     }
                 });
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(&self.status.text).size(13.0).color(match self.status.severity { StatusSeverity::Error => theme::NEGATIVE, StatusSeverity::Success => theme::POSITIVE, StatusSeverity::Info => theme::LOCK_TEXT_SECONDARY }));
+                let status_color = match self.status.severity {
+                    StatusSeverity::Error => theme::NEGATIVE,
+                    StatusSeverity::Success => theme::POSITIVE,
+                    StatusSeverity::Info => theme::LOCK_TEXT_SECONDARY,
+                };
+                crate::show_live_status(
+                    ui,
+                    "story_lock_status",
+                    &self.status.text,
+                    status_color,
+                    13.0,
+                    false,
+                    self.status.severity,
+                );
                 ui.label(egui::RichText::new("Local-only  •  No account  •  No cloud sync").size(12.0).color(theme::LOCK_TEXT_SECONDARY));
             }));
         });
