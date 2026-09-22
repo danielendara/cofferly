@@ -2380,14 +2380,47 @@ impl CofferlyApp {
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_max_width(300.0);
-                ui.label(
-                    egui::RichText::new(display)
-                        .size(11.0)
-                        .strong()
-                        .color(text_color),
+                show_live_status(
+                    ui,
+                    "parent_mode_status",
+                    &display,
+                    text_color,
+                    11.0,
+                    true,
+                    self.status.severity,
                 );
             });
     }
+}
+
+/// Status chip/label. `id_salt` is a fixed surface id, not the message, so a
+/// repeated or replaced string updates the same AccessKit node. With AccessKit
+/// off the builder returns `None` and the label is unchanged.
+pub(crate) fn show_live_status(
+    ui: &mut egui::Ui,
+    id_salt: &'static str,
+    text: &str,
+    color: egui::Color32,
+    size: f32,
+    strong: bool,
+    severity: StatusSeverity,
+) -> egui::Response {
+    let mut rich = egui::RichText::new(text).size(size).color(color);
+    if strong {
+        rich = rich.strong();
+    }
+    let response = ui.push_id(id_salt, |ui| ui.label(rich)).inner;
+    let live = match severity {
+        StatusSeverity::Error => egui::accesskit::Live::Assertive,
+        StatusSeverity::Info | StatusSeverity::Success => egui::accesskit::Live::Polite,
+    };
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_live(live);
+        node.set_label(text);
+        node.set_value(text);
+    });
+    response
 }
 
 fn export_opened_status(kind: &str, path: &Path) -> Status {
@@ -4386,6 +4419,79 @@ mod app_tests {
             filtered_export_opened_status("printable ledger", Path::new("ledger.html"), "nope", 0);
         assert!(none.contains("0 entries"));
         assert!(none.contains("nope"));
+    }
+
+    #[test]
+    fn status_live_region_follows_severity_and_keeps_its_id() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+
+        let frames = [
+            (StatusSeverity::Error, "Could not save: disk full"),
+            (StatusSeverity::Error, "Could not save: disk full"),
+            (StatusSeverity::Success, "Opened CSV ledger."),
+            (StatusSeverity::Info, "Child 1, balance $0.00"),
+        ];
+        let mut ids = Vec::new();
+        for (severity, text) in frames {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let response = show_live_status(
+                    ui,
+                    "parent_mode_status",
+                    text,
+                    egui::Color32::BLACK,
+                    11.0,
+                    true,
+                    severity,
+                );
+                ids.push(response.id);
+                let node = ui.ctx().accesskit_node_builder(response.id, |node| {
+                    (
+                        node.role(),
+                        node.live(),
+                        node.label().map(str::to_owned),
+                        node.value().map(str::to_owned),
+                    )
+                });
+                let (role, live, label, value) = node.expect("accesskit node");
+                assert_eq!(role, egui::accesskit::Role::Status);
+                let expected_live = match severity {
+                    StatusSeverity::Error => egui::accesskit::Live::Assertive,
+                    StatusSeverity::Info | StatusSeverity::Success => egui::accesskit::Live::Polite,
+                };
+                assert_eq!(live, Some(expected_live));
+                assert_eq!(label.as_deref(), Some(text));
+                assert_eq!(value.as_deref(), Some(text));
+            });
+            output.drop_without_applying_deltas();
+        }
+        assert_eq!(
+            ids[0], ids[1],
+            "repeating the same message keeps the node id"
+        );
+        assert_eq!(ids[0], ids[2], "a new message updates the same node id");
+        assert_eq!(ids[0], ids[3]);
+
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let response = show_live_status(
+                ui,
+                "lock_screen_status",
+                "⚠ Could not save: disk full",
+                egui::Color32::BLACK,
+                13.0,
+                false,
+                StatusSeverity::Error,
+            );
+            assert_ne!(response.id, egui::Id::NULL);
+            assert!(
+                ui.ctx()
+                    .accesskit_node_builder(response.id, |_| ())
+                    .is_none(),
+                "accesskit off leaves the label in place and the builder unused"
+            );
+        });
+        output.drop_without_applying_deltas();
     }
 
     #[test]
