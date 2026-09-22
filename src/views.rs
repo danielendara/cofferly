@@ -1284,30 +1284,39 @@ impl CofferlyApp {
                         LedgerSort::NewestFirst => "Newest",
                         LedgerSort::OldestFirst => "Oldest",
                     };
+                    // Space/Enter activate this button only while it is focused.
                     let response = ui
-                        .horizontal(|ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.label(
+                        .add_sized(
+                            ui.available_size(),
+                            egui::Button::new(
                                 egui::RichText::new("Date")
                                     .strong()
                                     .size(12.0)
                                     .color(theme::TEXT_PRIMARY),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(order_label)
-                                            .size(10.0)
-                                            .color(theme::TEXT_SECONDARY),
-                                    );
-                                },
-                            );
-                        })
-                        .response;
-                    let response = response
-                        .interact(egui::Sense::click())
+                            )
+                            .right_text(
+                                egui::RichText::new(order_label)
+                                    .size(10.0)
+                                    .color(theme::TEXT_SECONDARY),
+                            )
+                            .frame(false),
+                        )
                         .on_hover_text(tooltip);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            ledger_date_sort_accessible_name(ledger_sort),
+                        )
+                    });
+                    if response.has_focus() {
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            egui::CornerRadius::same(4),
+                            egui::Stroke::new(1.5, theme::ACCENT_DARK),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
                     if response.clicked() {
                         toggle_sort = true;
                     }
@@ -1470,6 +1479,13 @@ fn draw_story_icon(ui: &egui::Ui, texture: &egui::TextureHandle, rect: egui::Rec
         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+fn ledger_date_sort_accessible_name(sort: LedgerSort) -> String {
+    match sort {
+        LedgerSort::NewestFirst => "Date, newest first. Activate to sort oldest first.".to_owned(),
+        LedgerSort::OldestFirst => "Date, oldest first. Activate to sort newest first.".to_owned(),
+    }
 }
 
 fn format_ledger_filter_match_count(count: usize) -> String {
@@ -1725,6 +1741,19 @@ mod settings_layout_tests {
 #[cfg(test)]
 mod ledger_amount_a11y_tests {
     use super::*;
+
+    #[test]
+    fn date_sort_button_name_states_the_order_and_that_it_toggles() {
+        let newest = ledger_date_sort_accessible_name(LedgerSort::NewestFirst);
+        let oldest = ledger_date_sort_accessible_name(LedgerSort::OldestFirst);
+        assert!(newest.contains("Date"));
+        assert!(newest.contains("newest first"));
+        assert!(newest.contains("sort oldest first"));
+        assert!(oldest.contains("Date"));
+        assert!(oldest.contains("oldest first"));
+        assert!(oldest.contains("sort newest first"));
+        assert_ne!(newest, oldest);
+    }
 
     #[test]
     fn ledger_filter_net_labels_positive_and_negative_amounts() {
