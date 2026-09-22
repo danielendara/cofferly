@@ -2589,7 +2589,7 @@ fn load_story_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::
 #[cfg(test)]
 mod app_tests {
     use super::*;
-    use crate::data::filter_ledger_rows;
+    use crate::data::ledger_filter_summary;
     use chrono::NaiveDate;
     use eframe::App as _;
     use eframe::Storage as _;
@@ -4664,8 +4664,9 @@ mod app_tests {
 
         app.ledger_filter = "allow".to_owned();
         let rows = app.cached_ledger_rows();
-        let filtered = filter_ledger_rows(&rows, &app.ledger_filter);
-        let descriptions: Vec<_> = filtered
+        let summary = ledger_filter_summary(&rows, &app.ledger_filter);
+        let descriptions: Vec<_> = summary
+            .rows
             .iter()
             .map(|row| row.description.as_str())
             .collect();
@@ -4678,8 +4679,8 @@ mod app_tests {
         assert_eq!(app.selected_wallet().entries.len(), 2);
 
         app.ledger_filter.clear();
-        let unfiltered = filter_ledger_rows(&rows, &app.ledger_filter);
-        assert_eq!(unfiltered.len(), rows.len());
+        let unfiltered = ledger_filter_summary(&rows, &app.ledger_filter);
+        assert_eq!(unfiltered.rows.len(), rows.len());
     }
 
     #[test]

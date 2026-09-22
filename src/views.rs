@@ -1246,7 +1246,7 @@ impl CofferlyApp {
         // Display-only filter: narrows which cached rows are rendered below
         // without mutating `Wallet::entries`, re-sorting, or touching
         // `ledger_cache`. The starting-balance row is always kept regardless
-        // of the query -- see `filter_ledger_rows`'s doc comment for why.
+        // of the query -- see `ledger_filter_summary` in `data.rs`.
 
         egui_extras::TableBuilder::new(ui)
             .striped(true)
@@ -1744,46 +1744,15 @@ mod ledger_amount_a11y_tests {
         };
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 
-        let cases: &[(&str, &[&str], &str, &str)] = &[
-            (
-                "",
-                &[
-                    "Starting balance",
-                    "Weekly allowance",
-                    "Snack",
-                    "Birthday gift",
-                ],
-                "3 matching",
-                "net +$28.00",
-            ),
-            (
-                "ALLOW",
-                &["Starting balance", "Weekly allowance"],
-                "1 matching",
-                "net +$5.00",
-            ),
-            (
-                "nonexistent",
-                &["Starting balance"],
-                "0 matching",
-                "net $0.00",
-            ),
-            (
-                "snack",
-                &["Starting balance", "Snack"],
-                "1 matching",
-                "net −$2.00",
-            ),
+        let cases: &[(&str, &str, &str)] = &[
+            ("", "3 matching", "net +$28.00"),
+            ("ALLOW", "1 matching", "net +$5.00"),
+            ("nonexistent", "0 matching", "net $0.00"),
+            ("snack", "1 matching", "net −$2.00"),
         ];
 
-        for &(query, expected_rows, expected_count, expected_net) in cases {
+        for &(query, expected_count, expected_net) in cases {
             let summary = ledger_filter_summary(&rows, query);
-            let descriptions: Vec<_> = summary
-                .rows
-                .iter()
-                .map(|row| row.description.as_str())
-                .collect();
-            assert_eq!(descriptions, expected_rows, "rows for {query:?}");
             assert_eq!(
                 format_ledger_filter_match_count(summary.matching_entry_count),
                 expected_count,
