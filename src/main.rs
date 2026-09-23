@@ -872,7 +872,7 @@ impl CofferlyApp {
         self.confirm_negative_cents = None;
         self.clear_pin_digits();
         self.cleanup_temp_artifacts();
-        self.set_status_info("Locked. Enter the parent PIN to make changes.");
+        self.set_status_info("Locked. Unlock parent mode to make changes.");
     }
 
     /// Tracks a temp export/recovery-card path so it can be deleted on lock/exit.
@@ -4521,6 +4521,10 @@ mod app_tests {
         app.lock_parent();
         assert!(!app.parent_unlocked);
         assert!(app.session.is_none());
+        assert_eq!(
+            app.status.text,
+            "Locked. Unlock parent mode to make changes."
+        );
     }
 
     #[test]
