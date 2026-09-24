@@ -93,6 +93,7 @@ mod tests {
                 description: "Book \"sale\"".to_owned(),
                 amount_cents: -750,
             }],
+            weekly_allowance: None,
         }];
 
         let written = write_csv_ledger(&path, &wallets).unwrap();
@@ -123,6 +124,7 @@ mod tests {
                 description: "+HYPERLINK(\"http://example.com\")".to_owned(),
                 amount_cents: -750,
             }],
+            weekly_allowance: None,
         }];
 
         let written = write_csv_ledger(&path, &wallets).unwrap();
@@ -173,6 +175,7 @@ mod tests {
                         amount_cents: -100,
                     },
                 ],
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Child 2".to_owned(),
@@ -182,6 +185,7 @@ mod tests {
                     description: "Bus fare".to_owned(),
                     amount_cents: -300,
                 }],
+                weekly_allowance: None,
             },
         ];
 

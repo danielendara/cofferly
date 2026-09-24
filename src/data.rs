@@ -8,6 +8,9 @@ pub const MAX_CHILD_NAME_CHARS: usize = 40;
 pub const MAX_ABSOLUTE_CENTS: i64 = 99_999_999_999;
 pub const MAX_DESCRIPTION_CHARS: usize = 100;
 pub const STARTING_BALANCE_DESCRIPTION: &str = "Starting balance";
+pub const WEEKLY_ALLOWANCE_DESCRIPTION: &str = "Weekly allowance";
+/// Missed weeks posted at one unlock; older missed weeks are skipped (and reported).
+pub const MAX_ALLOWANCE_CATCH_UP_WEEKS: i64 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppData {
@@ -23,6 +26,59 @@ pub struct Wallet {
     pub child_name: String,
     pub starting_balance_cents: i64,
     pub entries: Vec<Entry>,
+    /// Optional auto-posted weekly allowance (#179). `None` = off. Defaulted so
+    /// older vaults and backups load unchanged, and omitted when off so they
+    /// also serialize unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly_allowance: Option<WeeklyAllowance>,
+}
+
+/// A wallet's weekly allowance. Dates are calendar dates (`NaiveDate` from the
+/// local clock), so DST shifts can't move a posting day.
+///
+/// Rules (#179):
+/// - The weekday is the day it was turned on (`enabled_on`). That day itself
+///   does **not** post: the parent turning it on has usually just handled this
+///   week, so the first automatic entry is one week later.
+/// - `last_posted` is the latest weekday already accounted for: `enabled_on`
+///   until the first post, then the date of the newest posted entry. It only
+///   moves forward and is saved in the same vault write as the entries it
+///   covers, so re-unlocking, relaunching, or restoring a backup never posts a
+///   week twice.
+/// - Changing the amount keeps `enabled_on` and `last_posted`; only future weeks
+///   use the new amount. Turning it off drops the whole setting; turning it
+///   back on starts fresh from that day (the weeks it was off never post).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeeklyAllowance {
+    pub amount_cents: i64,
+    pub enabled_on: NaiveDate,
+    pub last_posted: NaiveDate,
+}
+
+impl WeeklyAllowance {
+    pub fn starting(amount_cents: i64, today: NaiveDate) -> Self {
+        Self {
+            amount_cents,
+            enabled_on: today,
+            last_posted: today,
+        }
+    }
+
+    pub fn weekday_name(&self) -> String {
+        self.enabled_on.format("%A").to_string()
+    }
+}
+
+/// What one catch-up pass did for a wallet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AllowancePosting {
+    /// Entries added.
+    pub posted: usize,
+    /// Missed weeks older than the 8-week catch-up window, never posted.
+    pub skipped_weeks: usize,
+    /// Posting stopped because the next entry would leave the supported
+    /// balance range (`MAX_ABSOLUTE_CENTS`). Retried at the next unlock.
+    pub stopped_at_limit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +258,56 @@ impl Wallet {
             .collect()
     }
 
+    /// Posts one "Weekly allowance" deposit per missed weekday after
+    /// `last_posted`, up to and including `today` -- never a future date. At
+    /// most the newest `MAX_ALLOWANCE_CATCH_UP_WEEKS` are posted; older missed
+    /// weeks are skipped and counted. A clock set before `last_posted` posts
+    /// nothing and leaves `last_posted` alone. Stops (without advancing past
+    /// the last posted week) if an entry would overflow the balance range.
+    pub fn post_due_allowance(&mut self, today: NaiveDate) -> AllowancePosting {
+        let mut result = AllowancePosting::default();
+        let Some(mut allowance) = self.weekly_allowance else {
+            return result;
+        };
+        if allowance.amount_cents <= 0 || !valid_cents(allowance.amount_cents) {
+            return result;
+        }
+
+        let days_since = (today - allowance.last_posted).num_days();
+        let weeks_due = days_since.div_euclid(7);
+        if weeks_due <= 0 {
+            return result;
+        }
+
+        let first_week = (weeks_due - MAX_ALLOWANCE_CATCH_UP_WEEKS).max(0) + 1;
+        let skipped_weeks = (first_week - 1) as usize;
+        let mut last_posted = allowance.last_posted;
+        for week in first_week..=weeks_due {
+            let date = allowance.last_posted + chrono::Duration::weeks(week);
+            self.entries.push(Entry {
+                date,
+                description: WEEKLY_ALLOWANCE_DESCRIPTION.to_owned(),
+                amount_cents: allowance.amount_cents,
+            });
+            if !self.balances_are_valid() {
+                self.entries.pop();
+                result.stopped_at_limit = true;
+                break;
+            }
+            result.posted += 1;
+            last_posted = date;
+        }
+
+        // Skipped weeks are only written off once the window after them posted
+        // (or at least started to); otherwise the next unlock re-evaluates them.
+        if result.posted > 0 {
+            result.skipped_weeks = skipped_weeks;
+            allowance.last_posted = last_posted;
+            self.weekly_allowance = Some(allowance);
+        }
+        result
+    }
+
     /// The most recently recorded deposit, for "Repeat last deposit" prefill.
     ///
     /// Entries don't carry their own `EntryKind` tag; a deposit is any entry
@@ -292,6 +398,7 @@ pub fn default_wallets() -> Vec<Wallet> {
             child_name: (*name).to_owned(),
             starting_balance_cents: 0,
             entries: Vec::new(),
+            weekly_allowance: None,
         })
         .collect()
 }
@@ -448,6 +555,7 @@ mod tests {
                 child_name: "Child 1".to_owned(),
                 starting_balance_cents: MAX_ABSOLUTE_CENTS + 1,
                 entries: Vec::new(),
+                weekly_allowance: None,
             }],
         };
 
@@ -466,6 +574,7 @@ mod tests {
                     description: "Too much".to_owned(),
                     amount_cents: 1,
                 }],
+                weekly_allowance: None,
             }],
         };
 
@@ -494,6 +603,7 @@ mod tests {
                     amount_cents: 100,
                 },
             ],
+            weekly_allowance: None,
         };
 
         let rows = wallet.ledger_rows_sorted(LedgerSort::NewestFirst);
@@ -524,6 +634,7 @@ mod tests {
                     amount_cents: 100,
                 },
             ],
+            weekly_allowance: None,
         };
 
         let rows = wallet.ledger_rows_sorted(LedgerSort::OldestFirst);
@@ -553,6 +664,7 @@ mod tests {
                     amount_cents: 2500,
                 },
             ],
+            weekly_allowance: None,
         }
     }
 
@@ -644,6 +756,7 @@ mod tests {
             child_name: "Child 1".to_owned(),
             starting_balance_cents: 500,
             entries: Vec::new(),
+            weekly_allowance: None,
         };
 
         assert!(wallet.latest_deposit().is_none());
@@ -659,6 +772,7 @@ mod tests {
                 description: "Snack".to_owned(),
                 amount_cents: -200,
             }],
+            weekly_allowance: None,
         };
 
         assert!(wallet.latest_deposit().is_none());
@@ -686,6 +800,7 @@ mod tests {
                     amount_cents: 2500,
                 },
             ],
+            weekly_allowance: None,
         };
 
         let latest = wallet.latest_deposit().unwrap();
@@ -710,10 +825,243 @@ mod tests {
                     amount_cents: 300,
                 },
             ],
+            weekly_allowance: None,
         };
 
         let latest = wallet.latest_deposit().unwrap();
         assert_eq!(latest.description, "Bonus chore");
         assert_eq!(latest.amount_cents, 300);
+    }
+
+    mod weekly_allowance {
+        use super::*;
+        use chrono::Datelike;
+
+        fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+            NaiveDate::from_ymd_opt(y, m, d).unwrap()
+        }
+
+        fn wallet_with(allowance: Option<WeeklyAllowance>) -> Wallet {
+            Wallet {
+                child_name: "Ada".to_owned(),
+                starting_balance_cents: 0,
+                entries: Vec::new(),
+                weekly_allowance: allowance,
+            }
+        }
+
+        fn posted_dates(wallet: &Wallet) -> Vec<NaiveDate> {
+            wallet
+                .entries
+                .iter()
+                .filter(|entry| entry.description == WEEKLY_ALLOWANCE_DESCRIPTION)
+                .map(|entry| entry.date)
+                .collect()
+        }
+
+        // Tuesday 2026-09-01.
+        const AMOUNT: i64 = 500;
+        fn enabled() -> WeeklyAllowance {
+            WeeklyAllowance::starting(AMOUNT, date(2026, 9, 1))
+        }
+
+        #[test]
+        fn off_is_a_no_op() {
+            let mut wallet = wallet_with(None);
+            assert_eq!(
+                wallet.post_due_allowance(date(2027, 1, 1)),
+                AllowancePosting::default()
+            );
+            assert!(wallet.entries.is_empty());
+            assert!(wallet.weekly_allowance.is_none());
+        }
+
+        #[test]
+        fn the_enable_day_and_the_rest_of_its_week_post_nothing() {
+            let mut wallet = wallet_with(Some(enabled()));
+            for day in 1..=7 {
+                assert_eq!(wallet.post_due_allowance(date(2026, 9, day)).posted, 0);
+            }
+            assert!(wallet.entries.is_empty());
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 1)
+            );
+            assert_eq!(enabled().weekday_name(), "Tuesday");
+        }
+
+        #[test]
+        fn one_missed_week_posts_one_entry_on_the_weekday() {
+            let mut wallet = wallet_with(Some(enabled()));
+            let result = wallet.post_due_allowance(date(2026, 9, 8));
+
+            assert_eq!(result.posted, 1);
+            assert_eq!(result.skipped_weeks, 0);
+            assert_eq!(
+                wallet.entries,
+                vec![Entry {
+                    date: date(2026, 9, 8),
+                    description: WEEKLY_ALLOWANCE_DESCRIPTION.to_owned(),
+                    amount_cents: AMOUNT,
+                }]
+            );
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 8)
+            );
+            assert_eq!(wallet.current_balance_cents(), AMOUNT);
+        }
+
+        #[test]
+        fn multiple_missed_weeks_post_each_weekday_and_never_a_future_date() {
+            let mut wallet = wallet_with(Some(enabled()));
+            // Monday, three Tuesdays later plus six days: the 4th Tuesday is tomorrow.
+            let result = wallet.post_due_allowance(date(2026, 9, 28));
+
+            assert_eq!(result.posted, 3);
+            assert_eq!(
+                posted_dates(&wallet),
+                vec![date(2026, 9, 8), date(2026, 9, 15), date(2026, 9, 22)]
+            );
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 22)
+            );
+        }
+
+        #[test]
+        fn catch_up_is_capped_at_eight_weeks_and_reports_skipped_weeks() {
+            let mut wallet = wallet_with(Some(enabled()));
+            // 11 Tuesdays after 2026-09-01 is 2026-11-17.
+            let result = wallet.post_due_allowance(date(2026, 11, 17));
+
+            assert_eq!(result.posted, 8);
+            assert_eq!(result.skipped_weeks, 3);
+            let dates = posted_dates(&wallet);
+            assert_eq!(dates.first(), Some(&date(2026, 9, 29)));
+            assert_eq!(dates.last(), Some(&date(2026, 11, 17)));
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 11, 17)
+            );
+
+            // The skipped weeks are written off, not retried.
+            assert_eq!(
+                wallet.post_due_allowance(date(2026, 11, 17)),
+                AllowancePosting::default()
+            );
+        }
+
+        #[test]
+        fn posting_is_idempotent_across_repeat_calls_and_a_save_reload() {
+            let mut wallet = wallet_with(Some(enabled()));
+            assert_eq!(wallet.post_due_allowance(date(2026, 9, 16)).posted, 2);
+            assert_eq!(wallet.post_due_allowance(date(2026, 9, 16)).posted, 0);
+
+            let reloaded: Wallet =
+                serde_json::from_str(&serde_json::to_string(&wallet).unwrap()).unwrap();
+            let mut reloaded = reloaded;
+            assert_eq!(reloaded.post_due_allowance(date(2026, 9, 21)).posted, 0);
+            assert_eq!(reloaded.entries.len(), 2);
+            assert_eq!(reloaded.post_due_allowance(date(2026, 9, 22)).posted, 1);
+            assert_eq!(reloaded.entries.len(), 3);
+        }
+
+        #[test]
+        fn a_clock_set_before_last_posted_posts_nothing_and_never_moves_it_back() {
+            let mut allowance = enabled();
+            allowance.last_posted = date(2026, 9, 22);
+            let mut wallet = wallet_with(Some(allowance));
+
+            for today in [date(2026, 9, 21), date(2026, 9, 1), date(2025, 1, 1)] {
+                assert_eq!(
+                    wallet.post_due_allowance(today),
+                    AllowancePosting::default()
+                );
+            }
+            assert!(wallet.entries.is_empty());
+            assert_eq!(wallet.weekly_allowance, Some(allowance));
+        }
+
+        #[test]
+        fn dst_and_year_boundaries_keep_the_same_weekday() {
+            // US DST starts Sun 2027-03-14 and ends Sun 2026-11-01; dates are
+            // calendar dates, so neither shift moves the posting day.
+            let mut spring = wallet_with(Some(WeeklyAllowance::starting(AMOUNT, date(2027, 3, 7))));
+            spring.post_due_allowance(date(2027, 3, 21));
+            assert_eq!(
+                posted_dates(&spring),
+                vec![date(2027, 3, 14), date(2027, 3, 21)]
+            );
+
+            let mut fall = wallet_with(Some(WeeklyAllowance::starting(AMOUNT, date(2026, 10, 25))));
+            fall.post_due_allowance(date(2026, 11, 8));
+            assert_eq!(
+                posted_dates(&fall),
+                vec![date(2026, 11, 1), date(2026, 11, 8)]
+            );
+
+            let mut new_year =
+                wallet_with(Some(WeeklyAllowance::starting(AMOUNT, date(2026, 12, 22))));
+            new_year.post_due_allowance(date(2027, 1, 6));
+            assert_eq!(
+                posted_dates(&new_year),
+                vec![date(2026, 12, 29), date(2027, 1, 5)]
+            );
+            assert!(posted_dates(&new_year)
+                .iter()
+                .all(|d| d.weekday() == chrono::Weekday::Tue));
+        }
+
+        #[test]
+        fn stops_before_exceeding_max_absolute_cents_and_retries_later() {
+            let mut wallet = wallet_with(Some(enabled()));
+            wallet.starting_balance_cents = MAX_ABSOLUTE_CENTS - AMOUNT - 1;
+
+            let result = wallet.post_due_allowance(date(2026, 9, 22));
+            assert_eq!(result.posted, 1);
+            assert!(result.stopped_at_limit);
+            assert!(wallet.balances_are_valid());
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 8)
+            );
+
+            let again = wallet.post_due_allowance(date(2026, 9, 22));
+            assert_eq!(again.posted, 0);
+            assert!(again.stopped_at_limit);
+            assert_eq!(
+                wallet.weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 8)
+            );
+            assert_eq!(wallet.entries.len(), 1);
+        }
+
+        #[test]
+        fn a_non_positive_or_out_of_range_amount_never_posts() {
+            for amount_cents in [0, -500, MAX_ABSOLUTE_CENTS + 1] {
+                let mut wallet = wallet_with(Some(WeeklyAllowance::starting(
+                    amount_cents,
+                    date(2026, 9, 1),
+                )));
+                assert_eq!(wallet.post_due_allowance(date(2026, 9, 29)).posted, 0);
+                assert!(wallet.entries.is_empty());
+            }
+        }
+
+        #[test]
+        fn vaults_without_the_field_load_and_save_unchanged() {
+            let legacy = r#"{"wallets":[{"child_name":"Ada","starting_balance_cents":100,"entries":[{"date":"2026-09-01","description":"Weekly allowance","amount_cents":500}]}]}"#;
+            let data: AppData = serde_json::from_str(legacy).unwrap();
+            assert!(data.wallets[0].weekly_allowance.is_none());
+            assert_eq!(serde_json::to_string(&data).unwrap(), legacy);
+
+            let mut on = data.clone();
+            on.wallets[0].weekly_allowance = Some(enabled());
+            let json = serde_json::to_string(&on).unwrap();
+            assert!(json.contains(r#""weekly_allowance":{"amount_cents":500,"enabled_on":"2026-09-01","last_posted":"2026-09-01"}"#));
+            let back: AppData = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.wallets[0].weekly_allowance, Some(enabled()));
+        }
     }
 }
