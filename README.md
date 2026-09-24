@@ -79,6 +79,15 @@ Use **Export this wallet CSV** or **Export all wallets CSV** for a spreadsheet b
 
 Cofferly writes these files in your OS temp folder and opens them. Previous Cofferly HTML and CSV temp files are cleaned up when the app starts. Nothing is uploaded.
 
+## Back up and move to a new PC
+
+All wallets live in one encrypted `vault.cofferly` file, so a lost or reimaged disk loses them even if you still have your Coffer Story. Keep a backup somewhere else, like a USB stick or another drive.
+
+- **Back up:** in parent mode, open **Settings → Backup → Back up vault…** and pick a folder. Cofferly saves a byte-for-byte encrypted copy named `Cofferly-backup-YYYY-MM-DD.cofferly`, reads it back to verify it, and shows **Last backup** in Settings. It never replaces an existing file without asking.
+- **Restore or move:** on the new PC, choose **Restore from backup…**. It's on the first-run screen, or in **Settings → Backup** once parent mode is unlocked. Pick the `.cofferly` file and enter the Coffer Story that was in use when the backup was made. Cofferly shows the wallets in the backup and asks you to confirm before replacing anything. The vault that was on this PC is kept next to it as `vault.pre-restore-<timestamp>.cofferly`.
+
+A backup is as private as the vault: without its Coffer Story it can't be opened. If you later change your Coffer Story, make a fresh backup.
+
 ## Windows Installer
 
 The repository includes an Inno Setup script at `installer/Cofferly.iss`.

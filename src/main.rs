@@ -213,6 +213,23 @@ struct UiState {
     /// without this field still loads with empty per-child filters.
     #[serde(default)]
     ledger_filters: HashMap<String, String>,
+    /// Date (YYYY-MM-DD) of the last verified vault backup, shown in Settings.
+    /// `#[serde(default)]` so older state without it reads as "Never backed up".
+    #[serde(default)]
+    last_backup: Option<String>,
+}
+
+/// A backup chosen for restore (#177). Nothing on disk changes until its
+/// Coffer Story decrypts it and the parent confirms the replace.
+pub(crate) struct PendingRestore {
+    pub(crate) file_name: String,
+    bytes: Vec<u8>,
+    /// Wallets in the vault being replaced (0 on a fresh install).
+    pub(crate) replaces_wallets: usize,
+    /// Lock screen to return to if the restore is cancelled.
+    return_mode: LockMode,
+    /// Set once the backup's Coffer Story decrypts it: awaiting confirmation.
+    pub(crate) decrypted: Option<(AppData, SessionCrypto)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,10 +322,17 @@ pub(crate) struct CofferlyApp {
     /// is still encrypted at construction time, so it can't be resolved to
     /// an index yet). Consumed (set to `None`) by the first `apply_unlock`.
     pending_wallet_selection_name: Option<String>,
+    /// Date of the last verified backup, persisted via `UiState`.
+    last_backup: Option<String>,
+    /// A backup destination that already exists, awaiting "Replace".
+    pending_backup_overwrite: Option<PathBuf>,
+    /// Restore in progress; drives the lock screen while `Some`.
+    restore: Option<PendingRestore>,
 }
 
 enum BackgroundCryptoResult {
     Unlock(Result<(AppData, SessionCrypto), String>),
+    RestoreDecrypt(Result<(AppData, SessionCrypto), String>),
     StorySetup {
         lock_mode: LockMode,
         outcome: Result<StorySetupSuccess, StorySetupError>,
@@ -465,6 +489,7 @@ impl CofferlyApp {
             last_entry_kind,
             ledger_filter,
             ledger_filters,
+            last_backup,
         ) = restore_ui_state(cc, restore_wallet_bound);
         let mut draft = EntryDraft::new();
         draft.kind = last_entry_kind;
@@ -518,6 +543,9 @@ impl CofferlyApp {
             capturing: std::env::var_os("COFFERLY_CAPTURE").is_some(),
             temp_artifact_paths: Vec::new(),
             pending_wallet_selection_name,
+            last_backup,
+            pending_backup_overwrite: None,
+            restore: None,
         }
     }
 
@@ -834,6 +862,9 @@ impl CofferlyApp {
                             self.register_unlock_failure(&err);
                         }
                     },
+                    BackgroundCryptoResult::RestoreDecrypt(outcome) => {
+                        self.apply_restore_decrypt(outcome)
+                    }
                     BackgroundCryptoResult::StorySetup { lock_mode, outcome } => {
                         if self.lock_mode != lock_mode {
                             if let Err(StorySetupError::Rewrap { session, .. }) = outcome {
@@ -1204,6 +1235,18 @@ impl CofferlyApp {
                     self.register_unlock_failure("Invalid Coffer Story.");
                     return;
                 };
+                if let Some(restore) = &self.restore {
+                    let bytes = restore.bytes.clone();
+                    self.unlocking = true;
+                    self.set_status_info("Checking the backup…");
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.unlock_rx = Some(rx);
+                    std::thread::spawn(move || {
+                        let outcome = io::open_backup(&bytes, &secret);
+                        let _ = tx.send(BackgroundCryptoResult::RestoreDecrypt(outcome));
+                    });
+                    return;
+                }
                 let Some(raw) = self.raw_bytes.clone() else {
                     return;
                 };
@@ -1922,6 +1965,210 @@ impl CofferlyApp {
         }
     }
 
+    /// Settings → "Back up vault…": native save dialog, then a verified copy.
+    pub(crate) fn back_up_vault(&mut self) {
+        if !self.can_change("Unlock parent mode to back up the vault.") {
+            return;
+        }
+        let file_name = io::backup_file_name(Local::now().date_naive());
+        let Some(dest) = rfd::FileDialog::new()
+            .set_title("Back up Cofferly vault")
+            .set_file_name(&file_name)
+            .add_filter("Cofferly vault", &["cofferly"])
+            .save_file()
+        else {
+            self.set_status_info("Backup cancelled.");
+            return;
+        };
+        self.back_up_vault_to(dest, false);
+    }
+
+    /// Copies the on-disk encrypted vault to `dest` byte-for-byte and verifies
+    /// it. An existing `dest` is only replaced after the parent confirms.
+    pub(crate) fn back_up_vault_to(&mut self, dest: PathBuf, replace_existing: bool) {
+        self.pending_backup_overwrite = None;
+        if !self.can_change("Unlock parent mode to back up the vault.") {
+            return;
+        }
+        let vault = match io::load_raw(&self.data_path) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                self.set_status_err(
+                    "Nothing to back up yet. Make a change first so the vault is saved.",
+                );
+                return;
+            }
+            Err(err) => {
+                self.set_status_err(format!("Could not read the vault to back it up: {err}"));
+                return;
+            }
+        };
+        if dest.exists() && !replace_existing {
+            let name = dest
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dest.display().to_string());
+            self.pending_backup_overwrite = Some(dest);
+            self.set_status_info(format!("{name} already exists. Replace it?"));
+            return;
+        }
+        match io::write_backup(&dest, &vault, replace_existing) {
+            Ok(()) => {
+                self.last_backup = Some(format_ledger_date(Local::now().date_naive()));
+                self.set_status_ok(format!(
+                    "Backed up the encrypted vault to {} and verified the copy.",
+                    dest.display()
+                ));
+            }
+            Err(err) => self.set_status_err(format!("Backup failed: {err}")),
+        }
+    }
+
+    pub(crate) fn cancel_backup_overwrite(&mut self) {
+        self.pending_backup_overwrite = None;
+        self.set_status_info("Backup cancelled. The existing file was not changed.");
+    }
+
+    /// Restore is offered in Settings (parent unlocked) and on a fresh
+    /// install's lock screen, never over a locked vault nobody has opened.
+    pub(crate) fn can_start_restore(&self) -> bool {
+        !self.unlocking
+            && self.restore.is_none()
+            && (self.parent_unlocked
+                || (self.raw_bytes.is_none()
+                    && matches!(
+                        self.lock_mode,
+                        LockMode::SetupReveal | LockMode::SetupConfirm
+                    )))
+    }
+
+    /// "Restore from backup…": native open dialog, then the backup's Coffer Story.
+    pub(crate) fn restore_from_backup(&mut self) {
+        if !self.can_start_restore() {
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Restore Cofferly backup")
+            .add_filter("Cofferly vault", &["cofferly"])
+            .pick_file()
+        else {
+            self.set_status_info("Restore cancelled. Nothing on this PC was changed.");
+            return;
+        };
+        self.begin_restore_from(&path);
+    }
+
+    /// Validates the chosen file and switches the lock screen to asking for
+    /// that backup's Coffer Story. Nothing on disk changes here.
+    pub(crate) fn begin_restore_from(&mut self, path: &Path) {
+        if !self.can_start_restore() {
+            return;
+        }
+        let bytes = match io::read_backup(path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.set_status_err(format!("Restore failed: {err}."));
+                return;
+            }
+        };
+        let replaces_wallets = if self.parent_unlocked {
+            self.data.wallets.len()
+        } else {
+            0
+        };
+        if self.parent_unlocked {
+            self.lock_parent();
+        }
+        let return_mode = self.lock_mode;
+        self.restore = Some(PendingRestore {
+            file_name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string()),
+            bytes,
+            replaces_wallets,
+            return_mode,
+            decrypted: None,
+        });
+        self.lock_mode = LockMode::Story;
+        self.reset_story_entry();
+        self.set_status_info("Choose the Coffer Story for this backup.");
+    }
+
+    fn apply_restore_decrypt(&mut self, outcome: Result<(AppData, SessionCrypto), String>) {
+        self.reset_story_entry();
+        let Some(restore) = self.restore.as_mut() else {
+            return;
+        };
+        match outcome {
+            Ok(decrypted) => {
+                let count = decrypted.0.wallets.len();
+                restore.decrypted = Some(decrypted);
+                self.reset_pin_failures();
+                self.set_status_info(format!(
+                    "Backup unlocked: {} in this backup. Check them, then confirm the restore.",
+                    wallet_count_label(count)
+                ));
+            }
+            Err(err) => self.register_unlock_failure(&err),
+        }
+    }
+
+    pub(crate) fn cancel_restore(&mut self) {
+        if self.unlocking {
+            return;
+        }
+        if let Some(restore) = self.restore.take() {
+            self.lock_mode = restore.return_mode;
+        }
+        self.reset_story_entry();
+        self.set_status_info("Restore cancelled. Nothing on this PC was changed.");
+    }
+
+    /// Replaces the vault with the decrypted backup (keeping a pre-restore
+    /// copy) and opens it. Any failure leaves the current vault untouched.
+    pub(crate) fn confirm_restore(&mut self) {
+        let Some(restore) = self.restore.take() else {
+            return;
+        };
+        let Some((data, session)) = restore.decrypted else {
+            self.restore = Some(PendingRestore {
+                decrypted: None,
+                ..restore
+            });
+            return;
+        };
+        let stamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+        match io::restore_vault(&self.data_path, &restore.bytes, &stamp) {
+            Ok(kept) => {
+                let count = data.wallets.len();
+                self.raw_bytes = Some(restore.bytes);
+                self.save_enabled = true;
+                self.lock_mode = LockMode::Story;
+                self.apply_unlock(data, session);
+                let kept = kept
+                    .and_then(|path| {
+                        path.file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                    })
+                    .map(|name| format!(" The previous vault was kept as {name}."))
+                    .unwrap_or_default();
+                self.set_status_ok(format!(
+                    "Restored {} from {}.{kept}",
+                    wallet_count_label(count),
+                    restore.file_name
+                ));
+            }
+            Err(err) => {
+                self.lock_mode = restore.return_mode;
+                self.reset_story_entry();
+                self.set_status_err(format!(
+                    "Restore failed: {err}. The vault on this PC was not changed."
+                ));
+            }
+        }
+    }
+
     fn export_selected_wallet_csv(&mut self) {
         if !self.save_enabled {
             self.set_status_err("Saved data could not be loaded, so export is disabled.");
@@ -2082,6 +2329,7 @@ impl eframe::App for CofferlyApp {
             last_entry_kind: self.draft.kind,
             ledger_filter: self.ledger_filter.clone(),
             ledger_filters: self.ledger_filters.clone(),
+            last_backup: self.last_backup.clone(),
         };
         eframe::set_value(storage, UI_STATE_KEY, &state);
     }
@@ -2423,6 +2671,14 @@ pub(crate) fn show_live_status(
     response
 }
 
+pub(crate) fn wallet_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 wallet".to_owned()
+    } else {
+        format!("{count} wallets")
+    }
+}
+
 fn export_opened_status(kind: &str, path: &Path) -> Status {
     Status::success(format!(
         "Opened {kind}. Print or save it from the window that opened, or find it at {}.",
@@ -2454,6 +2710,18 @@ fn filtered_export_opened_status(
     )
 }
 
+/// Wallet index, sort, wallet name, entry kind, ledger filter, per-child
+/// filters, and last backup date, in that order.
+type RestoredUiState = (
+    usize,
+    LedgerSort,
+    Option<String>,
+    EntryKind,
+    String,
+    HashMap<String, String>,
+    Option<String>,
+);
+
 /// Returns the eagerly-clamped index (a placeholder only good enough for the
 /// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`),
 /// the persisted ledger sort, the persisted wallet name (if any, which
@@ -2461,17 +2729,7 @@ fn filtered_export_opened_status(
 /// the last-selected Money in/out kind, the selected kid's ledger description
 /// filter, and the per-child filter map (applied directly -- unlike the wallet
 /// name, they need no real data to resolve against).
-fn restore_ui_state(
-    cc: &eframe::CreationContext<'_>,
-    wallet_count: usize,
-) -> (
-    usize,
-    LedgerSort,
-    Option<String>,
-    EntryKind,
-    String,
-    HashMap<String, String>,
-) {
+fn restore_ui_state(cc: &eframe::CreationContext<'_>, wallet_count: usize) -> RestoredUiState {
     let wallet_count = wallet_count.max(1);
     let Some(storage) = cc.storage else {
         return (
@@ -2481,6 +2739,7 @@ fn restore_ui_state(
             EntryKind::default(),
             String::new(),
             HashMap::new(),
+            None,
         );
     };
     let Some(state) = eframe::get_value::<UiState>(storage, UI_STATE_KEY) else {
@@ -2491,6 +2750,7 @@ fn restore_ui_state(
             EntryKind::default(),
             String::new(),
             HashMap::new(),
+            None,
         );
     };
     let selected = state.selected_wallet.min(wallet_count.saturating_sub(1));
@@ -2506,6 +2766,7 @@ fn restore_ui_state(
         state.last_entry_kind,
         restore_ledger_filter(state.ledger_filter),
         restore_ledger_filters(state.ledger_filters),
+        state.last_backup,
     )
 }
 
@@ -2735,6 +2996,9 @@ mod app_tests {
             capturing: false,
             temp_artifact_paths: Vec::new(),
             pending_wallet_selection_name: None,
+            last_backup: None,
+            pending_backup_overwrite: None,
+            restore: None,
         };
         (app, dir)
     }
@@ -3413,6 +3677,241 @@ mod app_tests {
         assert!(app.status.text.contains("data.json backup"));
     }
 
+    /// Writes a Coffer Story vault with one renamed wallet and returns its bytes.
+    fn story_vault(
+        story_objects: [&'static str; story::STORY_LENGTH],
+        child_name: &str,
+        wallets: usize,
+    ) -> Vec<u8> {
+        let mut data = default_app_data();
+        data.wallets[0].child_name = child_name.to_owned();
+        data.wallets.truncate(wallets.min(data.wallets.len()));
+        let secret = story::encode(&story_objects).unwrap();
+        let mut session = None;
+        crypto::encrypt(&serde_json::to_vec(&data).unwrap(), &secret, &mut session).unwrap()
+    }
+
+    const BACKUP_STORY: [&str; story::STORY_LENGTH] =
+        ["crown", "diamond", "drum", "feather", "fish", "flower"];
+
+    /// An unlocked app whose on-disk vault is a story vault named "Current child".
+    fn unlocked_story_app() -> (CofferlyApp, TempDir, Vec<u8>) {
+        let (mut app, dir) = test_app();
+        let current = story_vault(test_story(), "Current child", 2);
+        std::fs::write(&app.data_path, &current).unwrap();
+        let (plain, session) =
+            crypto::decrypt(&current, &story::encode(&test_story()).unwrap()).unwrap();
+        app.data = serde_json::from_slice(&plain).unwrap();
+        app.raw_bytes = Some(current.clone());
+        app.session = Some(session);
+        (app, dir, current)
+    }
+
+    #[test]
+    fn backup_writes_a_verified_copy_and_remembers_the_date() {
+        let (mut app, dir, current) = unlocked_story_app();
+        let dest = dir.path().join("Cofferly-backup-2026-09-03.cofferly");
+
+        app.back_up_vault_to(dest.clone(), false);
+
+        assert_eq!(std::fs::read(&dest).unwrap(), current);
+        assert_eq!(app.status.severity, StatusSeverity::Success);
+        assert!(app.status.text.contains("verified"));
+        assert_eq!(
+            app.last_backup,
+            Some(format_ledger_date(Local::now().date_naive()))
+        );
+    }
+
+    #[test]
+    fn backup_asks_before_replacing_an_existing_file() {
+        let (mut app, dir, current) = unlocked_story_app();
+        let dest = dir.path().join("existing.cofferly");
+        std::fs::write(&dest, b"older backup").unwrap();
+
+        app.back_up_vault_to(dest.clone(), false);
+        assert_eq!(
+            app.pending_backup_overwrite.as_deref(),
+            Some(dest.as_path())
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
+        assert!(app.last_backup.is_none());
+
+        app.cancel_backup_overwrite();
+        assert!(app.pending_backup_overwrite.is_none());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
+
+        app.back_up_vault_to(dest.clone(), true);
+        assert_eq!(std::fs::read(&dest).unwrap(), current);
+    }
+
+    #[test]
+    fn backup_requires_parent_mode_and_a_saved_vault() {
+        let (mut app, dir) = test_app();
+        let dest = dir.path().join("backup.cofferly");
+
+        app.back_up_vault_to(dest.clone(), false);
+        assert!(app.status.text.contains("Nothing to back up"));
+
+        app.parent_unlocked = false;
+        app.back_up_vault_to(dest.clone(), false);
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn restore_from_settings_confirms_then_replaces_and_keeps_a_pre_restore_copy() {
+        let (mut app, dir, current) = unlocked_story_app();
+        let backup_path = dir.path().join("backup.cofferly");
+        let backup = story_vault(BACKUP_STORY, "Backup child", 1);
+        std::fs::write(&backup_path, &backup).unwrap();
+
+        app.begin_restore_from(&backup_path);
+        assert!(
+            !app.parent_unlocked,
+            "restore asks for the backup's story on the lock screen"
+        );
+        assert_eq!(app.lock_mode, LockMode::Story);
+        assert_eq!(app.restore.as_ref().unwrap().replaces_wallets, 2);
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), current);
+
+        app.story_selections = BACKUP_STORY.into();
+        app.submit_story();
+        finish_background_work(&mut app);
+        let restore = app.restore.as_ref().unwrap();
+        assert_eq!(
+            restore.decrypted.as_ref().unwrap().0.wallets[0].child_name,
+            "Backup child"
+        );
+        assert_eq!(
+            std::fs::read(&app.data_path).unwrap(),
+            current,
+            "nothing changes before confirm"
+        );
+
+        app.confirm_restore();
+
+        assert!(app.restore.is_none());
+        assert!(app.parent_unlocked);
+        assert_eq!(app.data.wallets.len(), 1);
+        assert_eq!(app.data.wallets[0].child_name, "Backup child");
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), backup);
+        assert!(app.status.text.contains("Restored 1 wallet"));
+        let kept: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("vault.pre-restore-")
+            })
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read(&kept[0]).unwrap(), current);
+
+        // Saves after a restore keep using the backup's key.
+        app.data.wallets[0].child_name = "Renamed".to_owned();
+        app.save_encrypted_data_and_refresh_ref(&story::encode(&BACKUP_STORY).unwrap())
+            .unwrap();
+        assert_eq!(
+            saved_data(&app, &story::encode(&BACKUP_STORY).unwrap()).wallets[0].child_name,
+            "Renamed"
+        );
+    }
+
+    #[test]
+    fn restore_with_the_wrong_story_changes_nothing() {
+        let (mut app, dir, current) = unlocked_story_app();
+        let backup_path = dir.path().join("backup.cofferly");
+        std::fs::write(&backup_path, story_vault(BACKUP_STORY, "Backup child", 1)).unwrap();
+
+        app.begin_restore_from(&backup_path);
+        app.story_selections = test_story().into();
+        app.submit_story();
+        finish_background_work(&mut app);
+
+        assert!(app.restore.as_ref().unwrap().decrypted.is_none());
+        assert_eq!(app.status.severity, StatusSeverity::Error);
+        assert!(app.status.text.contains("Wrong Coffer Story"));
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), current);
+
+        app.cancel_restore();
+        assert!(app.restore.is_none());
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), current);
+    }
+
+    #[test]
+    fn restore_rejects_a_non_cofferly_file_without_locking() {
+        let (mut app, dir, current) = unlocked_story_app();
+        let not_a_backup = dir.path().join("notes.cofferly");
+        std::fs::write(&not_a_backup, b"hello").unwrap();
+
+        app.begin_restore_from(&not_a_backup);
+
+        assert!(app.restore.is_none());
+        assert!(app.parent_unlocked);
+        assert!(app.status.text.contains("not a Cofferly backup"));
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), current);
+    }
+
+    #[test]
+    fn restore_is_offered_on_a_fresh_install_but_not_over_a_locked_vault() {
+        let (mut app, dir) = test_app();
+        let backup_path = dir.path().join("backup.cofferly");
+        let backup = story_vault(BACKUP_STORY, "Backup child", 2);
+        std::fs::write(&backup_path, &backup).unwrap();
+
+        app.parent_unlocked = false;
+        app.raw_bytes = Some(b"locked vault".to_vec());
+        assert!(!app.can_start_restore());
+        app.begin_restore_from(&backup_path);
+        assert!(app.restore.is_none());
+
+        app.raw_bytes = None;
+        app.lock_mode = LockMode::SetupReveal;
+        assert!(app.can_start_restore());
+        app.begin_restore_from(&backup_path);
+        assert_eq!(app.restore.as_ref().unwrap().replaces_wallets, 0);
+
+        app.story_selections = BACKUP_STORY.into();
+        app.submit_story();
+        finish_background_work(&mut app);
+        app.confirm_restore();
+
+        assert!(app.parent_unlocked);
+        assert_eq!(std::fs::read(&app.data_path).unwrap(), backup);
+        assert!(!app.status.text.contains("pre-restore"));
+    }
+
+    #[test]
+    fn cancelling_a_fresh_install_restore_returns_to_the_new_story() {
+        let (mut app, dir) = test_app();
+        let backup_path = dir.path().join("backup.cofferly");
+        std::fs::write(&backup_path, story_vault(BACKUP_STORY, "Backup child", 1)).unwrap();
+        app.parent_unlocked = false;
+        app.lock_mode = LockMode::SetupReveal;
+
+        app.begin_restore_from(&backup_path);
+        app.cancel_restore();
+
+        assert_eq!(app.lock_mode, LockMode::SetupReveal);
+        assert!(!app.data_path.exists());
+    }
+
+    #[test]
+    fn last_backup_date_persists_through_save() {
+        let (mut app, _dir) = test_app();
+        app.last_backup = Some("2026-09-03".to_owned());
+        let mut storage = FakeStorage::default();
+
+        app.save(&mut storage);
+
+        let state = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
+        assert_eq!(state.last_backup.as_deref(), Some("2026-09-03"));
+    }
+
     #[test]
     fn first_run_unlocks_without_creating_a_file() {
         let (mut app, _dir) = test_app();
@@ -3679,6 +4178,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::default(),
                 ledger_filter: String::new(),
                 ledger_filters: HashMap::new(),
+                last_backup: None,
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3868,6 +4368,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::Deposit,
                 ledger_filter: String::new(),
                 ledger_filters: HashMap::new(),
+                last_backup: None,
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3911,6 +4412,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::default(),
                 ledger_filter: long_filter,
                 ledger_filters: HashMap::new(),
+                last_backup: None,
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3934,6 +4436,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::Deposit,
                 ledger_filter: "snack".to_owned(),
                 ledger_filters: HashMap::new(),
+                last_backup: None,
             },
         );
 
@@ -4039,6 +4542,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::default(),
                 ledger_filter: "snack".to_owned(),
                 ledger_filters: filters,
+                last_backup: None,
             },
         );
         let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -4123,6 +4627,7 @@ mod app_tests {
                     filters.insert("Alice".to_owned(), "snack".to_owned());
                     filters
                 },
+                last_backup: None,
             },
         );
 
@@ -4161,6 +4666,7 @@ mod app_tests {
                 last_entry_kind: EntryKind::Deposit,
                 ledger_filter: String::new(),
                 ledger_filters: HashMap::new(),
+                last_backup: None,
             },
         );
 

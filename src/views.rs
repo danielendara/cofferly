@@ -292,11 +292,18 @@ impl CofferlyApp {
                 // stable column instead of letting the frame span the whole window.
                 egui::Frame::new().fill(theme::CARD_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(egui::CornerRadius::same(14)).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
                     ui.set_width(540.0);
+                    if self.restore.as_ref().is_some_and(|restore| restore.decrypted.is_some()) {
+                        self.restore_confirm_panel(ui);
+                        return;
+                    }
                     let is_reveal = matches!(self.lock_mode, LockMode::SetupReveal | LockMode::MigrateReveal | LockMode::ChangeReveal);
                     let is_migration = matches!(self.lock_mode, LockMode::MigrateReveal | LockMode::MigrateConfirm);
                     let is_change = matches!(self.lock_mode, LockMode::ChangeReveal | LockMode::ChangeConfirm);
-                    let heading = if is_reveal { if is_migration { "Move to Coffer Story" } else if is_change { "Your replacement Coffer Story" } else { "Your new Coffer Story" } } else if matches!(self.lock_mode, LockMode::SetupConfirm | LockMode::MigrateConfirm | LockMode::ChangeConfirm) { "Confirm your Coffer Story" } else { "Welcome back" };
+                    let heading = if is_reveal { if is_migration { "Move to Coffer Story" } else if is_change { "Your replacement Coffer Story" } else { "Your new Coffer Story" } } else if matches!(self.lock_mode, LockMode::SetupConfirm | LockMode::MigrateConfirm | LockMode::ChangeConfirm) { "Confirm your Coffer Story" } else if self.restore.is_some() { "Unlock the backup" } else { "Welcome back" };
                     ui.label(egui::RichText::new(heading).size(20.0).strong().color(theme::TEXT_PRIMARY));
+                    if let Some(restore) = &self.restore {
+                        ui.label(egui::RichText::new(format!("Choose the Coffer Story that was used for {}. Nothing on this PC changes until you confirm.", restore.file_name)).size(13.0).color(theme::LOCK_TEXT_SECONDARY));
+                    }
                     if is_reveal {
                         ui.label(egui::RichText::new("Cofferly generated this six-object key. Keep it private — it unlocks your encrypted ledger.").size(13.0).color(theme::LOCK_TEXT_SECONDARY));
                         ui.add_space(12.0);
@@ -312,6 +319,11 @@ impl CofferlyApp {
                             if is_migration && ui.button("Cancel migration").clicked() { self.cancel_story_migration(); }
                             if is_change && ui.button("Cancel").clicked() { self.cancel_story_change(); }
                         });
+                        if self.lock_mode == LockMode::SetupReveal && self.can_start_restore() {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Moving from another PC? Restore a Cofferly backup instead.").size(12.0).color(theme::LOCK_TEXT_SECONDARY));
+                            if ui.button("Restore from backup…").clicked() { self.restore_from_backup(); }
+                        }
                     } else {
                         let cooldown = self.unlock_cooldown_remaining();
                         if let Some(remaining) = cooldown { ui.ctx().request_repaint_after(remaining.min(std::time::Duration::from_secs(1))); ui.label(egui::RichText::new(format!("Try again in {}", crate::format_cooldown(remaining))).color(theme::NEGATIVE)); }
@@ -418,6 +430,13 @@ impl CofferlyApp {
                                 }
                                 _ => {}
                             }
+                            if self.restore.is_some()
+                                && ui
+                                    .add_enabled(!self.unlocking, egui::Button::new("Cancel restore"))
+                                    .clicked()
+                            {
+                                self.cancel_restore();
+                            }
                         });
                         if ui.input(|input| input.key_pressed(egui::Key::Backspace)) {
                             self.remove_last_story_selection();
@@ -494,6 +513,80 @@ impl CofferlyApp {
                 );
                 ui.label(egui::RichText::new("Local-only  •  No account  •  No cloud sync").size(12.0).color(theme::LOCK_TEXT_SECONDARY));
             }));
+        });
+    }
+
+    /// Restore step 3 (#177): show the backup's wallets and confirm the replace.
+    fn restore_confirm_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(restore) = &self.restore else {
+            return;
+        };
+        let Some((data, _)) = &restore.decrypted else {
+            return;
+        };
+        let file_name = restore.file_name.clone();
+        let replaces = restore.replaces_wallets;
+        let wallets: Vec<(String, i64)> = data
+            .wallets
+            .iter()
+            .map(|wallet| (wallet.child_name.clone(), wallet.current_balance_cents()))
+            .collect();
+
+        ui.label(
+            egui::RichText::new("Restore this backup?")
+                .size(20.0)
+                .strong()
+                .color(theme::TEXT_PRIMARY),
+        );
+        ui.label(
+            egui::RichText::new(format!(
+                "{file_name} has {}:",
+                crate::wallet_count_label(wallets.len())
+            ))
+            .size(13.0)
+            .color(theme::LOCK_TEXT_SECONDARY),
+        );
+        ui.add_space(8.0);
+        for (name, balance) in &wallets {
+            ui.label(
+                egui::RichText::new(format!("{name} — {}", format_money(*balance)))
+                    .size(14.0)
+                    .color(theme::TEXT_PRIMARY),
+            );
+        }
+        ui.add_space(10.0);
+        let warning = if replaces == 0 {
+            "This PC has no wallets yet. The backup becomes this PC's vault.".to_owned()
+        } else {
+            format!(
+                "This replaces {} on this PC. The current vault is kept as a pre-restore copy next to it.",
+                crate::wallet_count_label(replaces)
+            )
+        };
+        ui.label(
+            egui::RichText::new(warning)
+                .size(12.0)
+                .strong()
+                .color(theme::NEGATIVE),
+        );
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Replace and open backup")
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(theme::ACCENT_DARK),
+                )
+                .clicked()
+            {
+                self.confirm_restore();
+            }
+            if ui.button("Cancel restore").clicked() {
+                self.cancel_restore();
+            }
         });
     }
 
@@ -804,6 +897,79 @@ impl CofferlyApp {
                                         self.add_child_wallet();
                                     }
                                 });
+                            },
+                        );
+
+                        ui.add_space(12.0);
+                        settings_section(
+                            ui,
+                            "Backup",
+                            "Save an encrypted copy of every wallet to a folder you choose, or restore one on this PC.",
+                            theme::FAINT_BG,
+                            egui::Stroke::new(1.0, theme::BORDER),
+                            theme::TEXT_PRIMARY,
+                            |ui| {
+                                let last_backup = match &self.last_backup {
+                                    Some(date) => format!("Last backup: {date}"),
+                                    None => "Never backed up".to_owned(),
+                                };
+                                ui.label(
+                                    egui::RichText::new(last_backup)
+                                        .size(12.0)
+                                        .strong()
+                                        .color(theme::TEXT_PRIMARY),
+                                );
+                                ui.label(
+                                    egui::RichText::new(
+                                        "The backup stays encrypted. Restoring it needs the Coffer Story that was in use when it was made.",
+                                    )
+                                    .size(11.0)
+                                    .color(theme::TEXT_SECONDARY),
+                                );
+                                ui.add_space(8.0);
+                                if let Some(dest) = self.pending_backup_overwrite.clone() {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} already exists. Replace it with a new backup?",
+                                            dest.display()
+                                        ))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(theme::NEGATIVE),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .add_sized([120.0, 36.0], egui::Button::new("Replace"))
+                                            .clicked()
+                                        {
+                                            self.back_up_vault_to(dest.clone(), true);
+                                        }
+                                        if ui
+                                            .add_sized([82.0, 36.0], egui::Button::new("Cancel"))
+                                            .clicked()
+                                        {
+                                            self.cancel_backup_overwrite();
+                                        }
+                                    });
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .add_sized([150.0, 36.0], egui::Button::new("Back up vault…"))
+                                            .clicked()
+                                        {
+                                            self.back_up_vault();
+                                        }
+                                        if ui
+                                            .add_sized(
+                                                [178.0, 36.0],
+                                                egui::Button::new("Restore from backup…"),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.restore_from_backup();
+                                        }
+                                    });
+                                }
                             },
                         );
 
