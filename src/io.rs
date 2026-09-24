@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 use crate::crypto::SessionCrypto;
 use crate::data::AppData;
 use crate::{APP_NAME, DATA_FILE_NAME, PREVIOUS_DATA_FILE_NAME};
+use chrono::NaiveDate;
 
 #[derive(Debug, Default)]
 pub struct DataVaultPreparation {
@@ -89,6 +90,129 @@ fn prepare_data_vault_at(
     Ok(DataVaultPreparation {
         preserved_previous_file: Some(previous_path.to_path_buf()),
     })
+}
+
+/// Suggested file name for a vault backup made on `date`.
+pub fn backup_file_name(date: NaiveDate) -> String {
+    format!("Cofferly-backup-{}.cofferly", date.format("%Y-%m-%d"))
+}
+
+/// Copy the encrypted vault byte-for-byte to `dest`, then read it back and
+/// compare before reporting success. An existing file at `dest` is only
+/// replaced when `replace_existing` is set (the parent confirmed it).
+pub fn write_backup(dest: &Path, vault_bytes: &[u8], replace_existing: bool) -> Result<(), String> {
+    if !crate::crypto::is_current_format(vault_bytes) {
+        return Err(
+            "The current vault is not a supported encrypted Cofferly file, so it was not backed up"
+                .to_owned(),
+        );
+    }
+
+    let written = if replace_existing {
+        write_atomically(dest, vault_bytes)
+    } else if dest.exists() {
+        Err(format!("{} already exists", dest.display()))
+    } else {
+        write_new_atomically(dest, vault_bytes)
+    };
+    written.map_err(|err| format!("Could not write the backup to {}: {err}", dest.display()))?;
+
+    match load_raw(dest)? {
+        Some(copied) if copied == vault_bytes => Ok(()),
+        _ => Err(format!(
+            "Backup verification failed at {}. Try another folder",
+            dest.display()
+        )),
+    }
+}
+
+/// Read a chosen backup and check it is an encrypted Coffer Story vault.
+/// Nothing is written.
+pub fn read_backup(path: &Path) -> Result<Vec<u8>, String> {
+    let bytes = load_raw(path)?.ok_or_else(|| format!("{} was not found", path.display()))?;
+    if !crate::crypto::is_current_format(&bytes) {
+        return Err(format!(
+            "{} is not a Cofferly backup. Nothing on this PC was changed",
+            path.display()
+        ));
+    }
+    if bytes.first() != Some(&crate::crypto::STORY_VERSION) {
+        return Err(
+            "This backup is from before Coffer Story. Unlock it with its legacy PIN on the PC it came from, then make a new backup. Nothing on this PC was changed"
+                .to_owned(),
+        );
+    }
+    Ok(bytes)
+}
+
+/// Decrypt a backup with the Coffer Story entered for it.
+pub fn open_backup(bytes: &[u8], secret: &str) -> Result<(AppData, SessionCrypto), String> {
+    let (plain, session) = crate::crypto::decrypt(bytes, secret)
+        .map_err(|_| "Wrong Coffer Story for this backup, or the file is damaged.".to_owned())?;
+    let data = serde_json::from_slice::<AppData>(&plain)
+        .ok()
+        .and_then(crate::data::normalize_app_data)
+        .ok_or_else(|| "The backup is invalid after decryption.".to_owned())?;
+    Ok((data, session))
+}
+
+/// Replace the vault at `current_path` with `backup_bytes`.
+///
+/// The current vault (if any) is first kept next to it as
+/// `vault.pre-restore-<stamp>.cofferly` and verified; the replace itself is
+/// atomic. Any failure before the replace leaves the current vault untouched,
+/// and a failed read-back after it puts the original bytes back. Returns the
+/// pre-restore copy's path.
+pub fn restore_vault(
+    current_path: &Path,
+    backup_bytes: &[u8],
+    stamp: &str,
+) -> Result<Option<PathBuf>, String> {
+    if !crate::crypto::is_current_format(backup_bytes) {
+        return Err("The backup is not a supported encrypted Cofferly file".to_owned());
+    }
+
+    let current = load_raw(current_path)?;
+    let pre_restore_path = match &current {
+        Some(current_bytes) => {
+            let parent = current_path.parent().ok_or_else(|| {
+                format!(
+                    "Could not find parent folder for {}",
+                    current_path.display()
+                )
+            })?;
+            let path = parent.join(format!("vault.pre-restore-{stamp}.cofferly"));
+            write_new_atomically(&path, current_bytes).map_err(|err| {
+                format!(
+                    "Could not keep a copy of the current vault at {}: {err}",
+                    path.display()
+                )
+            })?;
+            if load_raw(&path)?.as_deref() != Some(current_bytes.as_slice()) {
+                return Err(format!(
+                    "Could not verify the copy of the current vault at {}",
+                    path.display()
+                ));
+            }
+            Some(path)
+        }
+        None => None,
+    };
+
+    write_atomically(current_path, backup_bytes)
+        .map_err(|err| format!("Could not replace {}: {err}", current_path.display()))?;
+
+    if load_raw(current_path)?.as_deref() != Some(backup_bytes) {
+        if let Some(original) = &current {
+            let _ = write_atomically(current_path, original);
+        }
+        return Err(format!(
+            "Restored vault verification failed at {}",
+            current_path.display()
+        ));
+    }
+
+    Ok(pre_restore_path)
 }
 
 pub fn load_raw(path: &Path) -> Result<Option<Vec<u8>>, String> {
@@ -198,6 +322,152 @@ mod tests {
         let serialized = serde_json::to_vec(&default_app_data()).unwrap();
         let mut session = None;
         crate::crypto::encrypt(&serialized, pin, &mut session).unwrap()
+    }
+
+    fn story_fixture(secret: &str, child_name: &str) -> Vec<u8> {
+        let mut data = default_app_data();
+        data.wallets[0].child_name = child_name.to_owned();
+        let serialized = serde_json::to_vec(&data).unwrap();
+        let mut session = Some(crate::crypto::SessionCrypto::establish(secret).unwrap());
+        crate::crypto::encrypt(&serialized, secret, &mut session).unwrap()
+    }
+
+    #[test]
+    fn backup_file_name_uses_the_date() {
+        let date = NaiveDate::from_ymd_opt(2026, 9, 3).unwrap();
+        assert_eq!(
+            backup_file_name(date),
+            "Cofferly-backup-2026-09-03.cofferly"
+        );
+    }
+
+    #[test]
+    fn backup_is_a_verified_byte_for_byte_copy() {
+        let dir = tempdir().unwrap();
+        let vault = story_fixture("story-secret", "Child A");
+        let dest = dir
+            .path()
+            .join("backups")
+            .join("Cofferly-backup-2026-09-03.cofferly");
+
+        write_backup(&dest, &vault, false).unwrap();
+
+        assert_eq!(fs::read(&dest).unwrap(), vault);
+    }
+
+    #[test]
+    fn backup_never_overwrites_without_confirmation() {
+        let dir = tempdir().unwrap();
+        let vault = story_fixture("story-secret", "Child A");
+        let dest = dir.path().join("existing.cofferly");
+        fs::write(&dest, b"keep me").unwrap();
+
+        let error = write_backup(&dest, &vault, false).unwrap_err();
+        assert!(error.contains("already exists"));
+        assert_eq!(fs::read(&dest).unwrap(), b"keep me");
+
+        write_backup(&dest, &vault, true).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), vault);
+    }
+
+    #[test]
+    fn backup_refuses_bytes_that_are_not_a_vault() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("backup.cofferly");
+
+        assert!(write_backup(&dest, b"{}", false).is_err());
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn restore_rejects_a_file_that_is_not_a_cofferly_backup() {
+        let dir = tempdir().unwrap();
+        let not_a_backup = dir.path().join("notes.cofferly");
+        fs::write(&not_a_backup, br#"{"wallets":[]}"#).unwrap();
+
+        let error = read_backup(&not_a_backup).unwrap_err();
+
+        assert!(error.contains("not a Cofferly backup"));
+        assert!(read_backup(&dir.path().join("missing.cofferly")).is_err());
+    }
+
+    #[test]
+    fn restore_rejects_a_legacy_pin_backup() {
+        let dir = tempdir().unwrap();
+        let legacy = dir.path().join("legacy.cofferly");
+        let mut bytes = encrypted_fixture("2468");
+        bytes[0] = crate::crypto::LEGACY_PIN_VERSION;
+        fs::write(&legacy, bytes).unwrap();
+
+        assert!(read_backup(&legacy).unwrap_err().contains("legacy PIN"));
+    }
+
+    #[test]
+    fn restore_rejects_the_wrong_story_and_accepts_the_right_one() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("backup.cofferly");
+        fs::write(&path, story_fixture("right-story", "Child A")).unwrap();
+        let bytes = read_backup(&path).unwrap();
+
+        let error = open_backup(&bytes, "wrong-story").unwrap_err();
+        assert!(error.contains("Wrong Coffer Story"));
+
+        let (data, _session) = open_backup(&bytes, "right-story").unwrap();
+        assert_eq!(data.wallets[0].child_name, "Child A");
+    }
+
+    #[test]
+    fn restore_keeps_a_pre_restore_copy_and_replaces_the_vault() {
+        let dir = tempdir().unwrap();
+        let current_path = dir.path().join(DATA_FILE_NAME);
+        let current = story_fixture("current-story", "Current child");
+        let backup = story_fixture("backup-story", "Backup child");
+        fs::write(&current_path, &current).unwrap();
+
+        let kept = restore_vault(&current_path, &backup, "20260903-101500")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            kept,
+            dir.path()
+                .join("vault.pre-restore-20260903-101500.cofferly")
+        );
+        assert_eq!(fs::read(&kept).unwrap(), current);
+        assert_eq!(fs::read(&current_path).unwrap(), backup);
+    }
+
+    #[test]
+    fn restore_onto_a_fresh_install_needs_no_pre_restore_copy() {
+        let dir = tempdir().unwrap();
+        let current_path = dir.path().join(DATA_FILE_NAME);
+        let backup = story_fixture("backup-story", "Backup child");
+
+        assert_eq!(
+            restore_vault(&current_path, &backup, "stamp").unwrap(),
+            None
+        );
+        assert_eq!(fs::read(&current_path).unwrap(), backup);
+    }
+
+    #[test]
+    fn restore_failure_leaves_the_current_vault_untouched() {
+        let dir = tempdir().unwrap();
+        let current_path = dir.path().join(DATA_FILE_NAME);
+        let current = story_fixture("current-story", "Current child");
+        fs::write(&current_path, &current).unwrap();
+
+        // Not a vault: rejected before anything is written.
+        assert!(restore_vault(&current_path, b"not a vault", "a").is_err());
+        assert_eq!(fs::read(&current_path).unwrap(), current);
+
+        // The pre-restore copy cannot be created (name already taken): no replace.
+        let taken = dir.path().join("vault.pre-restore-b.cofferly");
+        fs::write(&taken, b"occupied").unwrap();
+        let backup = story_fixture("backup-story", "Backup child");
+        assert!(restore_vault(&current_path, &backup, "b").is_err());
+        assert_eq!(fs::read(&current_path).unwrap(), current);
+        assert_eq!(fs::read(&taken).unwrap(), b"occupied");
     }
 
     #[test]
