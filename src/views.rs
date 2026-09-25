@@ -8,8 +8,8 @@
 use eframe::egui;
 
 use crate::data::{
-    description_length_accessible_name, description_length_label, ledger_filter_summary,
-    valid_child_name, LedgerRowDate, LedgerSort,
+    description_length_accessible_name, description_length_label, format_ledger_date,
+    ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -652,6 +652,7 @@ impl CofferlyApp {
 
         let selected_name = self.selected_wallet().child_name.clone();
         let starting_balance = self.selected_wallet().starting_balance_cents;
+        let weekly_allowance = self.selected_wallet().weekly_allowance;
         let has_entries = !self.selected_wallet().entries.is_empty();
         let can_delete_wallet = self.data.wallets.len() > 1;
         let modal_width = settings_modal_width(ctx.content_rect().width());
@@ -816,6 +817,44 @@ impl CofferlyApp {
                                         .clicked()
                                     {
                                         self.update_starting_balance();
+                                    }
+                                });
+
+                                ui.add_space(12.0);
+                                settings_field_label(ui, "Weekly allowance");
+                                let allowance_hint = match weekly_allowance {
+                                    Some(allowance) => format!(
+                                        "Posts {} every {} at unlock (turned on {}). Leave blank to turn it off.",
+                                        format_money(allowance.amount_cents),
+                                        allowance.weekday_name(),
+                                        format_ledger_date(allowance.enabled_on)
+                                    ),
+                                    None => "Blank = off. Saving an amount makes today the posting weekday; the first entry is added one week from today.".to_owned(),
+                                };
+                                ui.label(
+                                    egui::RichText::new(allowance_hint)
+                                        .size(11.0)
+                                        .color(theme::TEXT_SECONDARY),
+                                );
+                                ui.add_space(4.0);
+                                let allowance_ready = self.weekly_allowance_save_ready();
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(
+                                            &mut self.weekly_allowance_input,
+                                        )
+                                        .hint_text("Off"),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            allowance_ready,
+                                            egui::Button::new("Save allowance")
+                                                .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.save_weekly_allowance();
                                     }
                                 });
 
@@ -1953,6 +1992,7 @@ mod ledger_amount_a11y_tests {
                     amount_cents: 2500,
                 },
             ],
+            weekly_allowance: None,
         };
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 

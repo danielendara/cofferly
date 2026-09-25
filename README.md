@@ -71,6 +71,14 @@ After unlocking parent mode, open **Settings** to rename the selected wallet, up
 
 Use **Remove latest entry** in Settings to undo the most recent ledger entry for the selected wallet. The app offers a short undo window before the next change.
 
+### Weekly allowance
+
+In **Settings**, each wallet has an optional **Weekly allowance** amount. Leave it blank to keep it off. Saving an amount turns it on, and the day you save it becomes the posting weekday (shown in Settings). That first day doesn't post; the first entry is added one week later.
+
+Each time parent mode is unlocked, Cofferly adds one "Weekly allowance" deposit for every posting weekday you missed, dated on those weekdays, and says how many it added in the status line. It never adds future dates, and it catches up at most 8 weeks; if more were missed, the status line says how many older weeks were skipped. The entries and the date of the last one posted are saved together in the encrypted vault, so unlocking again, relaunching, or restoring a backup never adds the same week twice. If saving fails, nothing is added and the next unlock tries again.
+
+Changing the amount only affects future weeks. Turning it off and back on starts fresh from the new day; the weeks it was off are not posted. Allowance entries can be edited or removed like any other entry. Cofferly doesn't post while it's locked or closed.
+
 ## Printing and CSV export
 
 Use **Print this wallet** to print the selected child's ledger, or **Print all wallets** to print every child wallet together.

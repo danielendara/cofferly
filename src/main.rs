@@ -38,7 +38,7 @@ use crypto::SessionCrypto;
 use data::{
     default_app_data, format_ledger_date, ledger_filter_summary, parse_ledger_date, valid_cents,
     valid_child_name, valid_description, AppData, Entry, EntryKind, LedgerSort, OwnedLedgerRow,
-    Wallet,
+    Wallet, WeeklyAllowance,
 };
 use export_csv::{write_csv_ledger, write_csv_ledger_filtered};
 use io::{
@@ -275,6 +275,8 @@ pub(crate) struct CofferlyApp {
     pending_ledger_filter_focus: bool,
     draft: EntryDraft,
     starting_balance_input: String,
+    /// Settings field for the selected wallet's weekly allowance (#179); blank = off.
+    weekly_allowance_input: String,
     child_name_input: String,
     new_child_name_input: String,
     pin_digits: [String; PIN_LENGTH],
@@ -509,6 +511,7 @@ impl CofferlyApp {
             pending_ledger_filter_focus: false,
             draft,
             starting_balance_input: String::new(),
+            weekly_allowance_input: String::new(),
             child_name_input: String::new(),
             new_child_name_input: String::new(),
             pin_digits: Default::default(),
@@ -782,7 +785,19 @@ impl CofferlyApp {
         }
     }
 
-    fn apply_unlock(&mut self, data: AppData, session: SessionCrypto) {
+    /// Opens the vault, then posts any weekly allowance due as of today. Returns
+    /// the allowance status (also folded into the status line) so callers that
+    /// replace the status line, like restore, can keep it.
+    fn apply_unlock(&mut self, data: AppData, session: SessionCrypto) -> Option<Status> {
+        self.apply_unlock_on(data, session, Local::now().date_naive())
+    }
+
+    fn apply_unlock_on(
+        &mut self,
+        data: AppData,
+        session: SessionCrypto,
+        today: NaiveDate,
+    ) -> Option<Status> {
         // Restore the wallet the parent had open last, by identity rather
         // than position -- an index alone can't tell a deleted wallet from
         // a merely-reordered one. `pending_wallet_selection_name` is only
@@ -834,12 +849,108 @@ impl CofferlyApp {
             self.set_status_info(
                 "Legacy PIN accepted. Enroll your Coffer Story to finish migration.",
             );
+            None
         } else {
-            self.set_status_ok(if self.previous_data_backup_preserved {
+            let unlocked = if self.previous_data_backup_preserved {
                 "Coffer Story unlocked. Verify your wallets before removing the data.json backup."
             } else {
                 "Coffer Story unlocked."
-            });
+            };
+            let allowance = self.post_due_allowances(today);
+            match &allowance {
+                None => self.set_status_ok(unlocked),
+                Some(status) => {
+                    self.status = Status {
+                        text: format!("{unlocked} {}", status.text),
+                        severity: status.severity,
+                    }
+                }
+            }
+            allowance
+        }
+    }
+
+    /// Posts every wallet's due weekly allowance (#179) into a copy of the
+    /// ledger and saves that copy; the in-memory ledger is replaced only after
+    /// the encrypted save succeeds. Entries and each wallet's `last_posted`
+    /// travel in the same vault write, so a failed save changes nothing (the
+    /// next unlock simply tries again) and a successful one can't be repeated.
+    fn post_due_allowances(&mut self, today: NaiveDate) -> Option<Status> {
+        if !self.save_enabled || !self.parent_unlocked {
+            return None;
+        }
+
+        let mut next = self.data.clone();
+        let mut posted = Vec::new();
+        let mut capped = Vec::new();
+        let mut at_limit = Vec::new();
+        for wallet in &mut next.wallets {
+            let result = wallet.post_due_allowance(today);
+            if result.posted > 0 {
+                posted.push(format!(
+                    "{} for {}",
+                    allowance_entry_count_label(result.posted),
+                    wallet.child_name
+                ));
+            }
+            if result.skipped_weeks > 0 {
+                capped.push(format!(
+                    "{} ({} older {} skipped)",
+                    wallet.child_name,
+                    result.skipped_weeks,
+                    if result.skipped_weeks == 1 {
+                        "week"
+                    } else {
+                        "weeks"
+                    }
+                ));
+            }
+            if result.stopped_at_limit {
+                at_limit.push(wallet.child_name.clone());
+            }
+        }
+
+        let mut parts = Vec::new();
+        if !posted.is_empty() {
+            let secret = if self.session.is_some() {
+                String::new()
+            } else {
+                next.parent_pin.clone()
+            };
+            match save_encrypted(&self.data_path, &next, &secret, &mut self.session) {
+                Ok(encrypted) => {
+                    self.raw_bytes = Some(encrypted);
+                    self.data = next;
+                    self.invalidate_ledger_cache();
+                }
+                Err(err) => {
+                    return Some(Status::error(format!(
+                        "Weekly allowance was not added: could not save ({err}). Nothing changed; it will be tried again at the next unlock."
+                    )));
+                }
+            }
+            parts.push(format!("Weekly allowance added: {}.", posted.join(", ")));
+            if !capped.is_empty() {
+                parts.push(format!(
+                    "Catch-up is capped at {} weeks: {}.",
+                    data::MAX_ALLOWANCE_CATCH_UP_WEEKS,
+                    capped.join(", ")
+                ));
+            }
+        }
+        if !at_limit.is_empty() {
+            parts.push(format!(
+                "Weekly allowance paused for {}: another deposit would exceed Cofferly's supported balance.",
+                at_limit.join(", ")
+            ));
+        }
+
+        if parts.is_empty() {
+            None
+        } else if at_limit.is_empty() {
+            Some(Status::success(parts.join(" ")))
+        } else {
+            Some(Status::error(parts.join(" ")))
         }
     }
 
@@ -854,7 +965,9 @@ impl CofferlyApp {
                 self.unlock_rx = None;
                 match result {
                     BackgroundCryptoResult::Unlock(outcome) => match outcome {
-                        Ok((data, session)) => self.apply_unlock(data, session),
+                        Ok((data, session)) => {
+                            self.apply_unlock(data, session);
+                        }
                         Err(err) => {
                             self.clear_pin_digits();
                             self.reset_story_entry();
@@ -1693,8 +1806,12 @@ impl CofferlyApp {
         let wallet = self.selected_wallet();
         let name = wallet.child_name.clone();
         let starting = wallet.starting_balance_cents;
+        let allowance = wallet
+            .weekly_allowance
+            .map(|allowance| allowance.amount_cents);
         self.child_name_input = name;
         self.starting_balance_input = format_money_input(starting);
+        self.weekly_allowance_input = allowance.map(format_money_input).unwrap_or_default();
     }
 
     fn open_settings(&mut self) {
@@ -1753,6 +1870,88 @@ impl CofferlyApp {
         ));
     }
 
+    fn weekly_allowance_save_ready(&self) -> bool {
+        let current = self
+            .selected_wallet()
+            .weekly_allowance
+            .map(|allowance| allowance.amount_cents);
+        let input = self.weekly_allowance_input.trim();
+        if input.is_empty() {
+            return current.is_some();
+        }
+        match parse_dollars_to_cents(input) {
+            Ok(cents) => cents > 0 && valid_cents(cents) && Some(cents) != current,
+            Err(_) => false,
+        }
+    }
+
+    fn save_weekly_allowance(&mut self) {
+        self.save_weekly_allowance_on(Local::now().date_naive());
+    }
+
+    /// One amount field (#179): blank turns the allowance off; a new amount
+    /// turns it on with today's weekday; changing the amount keeps the weekday
+    /// and `last_posted` (only future weeks use the new amount).
+    fn save_weekly_allowance_on(&mut self, today: NaiveDate) {
+        if !self.can_change("Unlock parent mode before changing the weekly allowance.") {
+            return;
+        }
+        self.undo = None;
+        self.confirm_delete_wallet = false;
+
+        let wallet_name = self.selected_wallet().child_name.clone();
+        let current = self.selected_wallet().weekly_allowance;
+        let input = self.weekly_allowance_input.trim().to_owned();
+
+        let status = if input.is_empty() {
+            if current.is_none() {
+                return;
+            }
+            self.selected_wallet_mut().weekly_allowance = None;
+            format!("Weekly allowance turned off for {wallet_name}.")
+        } else {
+            let Ok(cents) = parse_dollars_to_cents(&input) else {
+                self.set_status_err(
+                    "Enter a weekly allowance like 5 or 5.00, or leave it blank to turn it off.",
+                );
+                return;
+            };
+            if cents <= 0 {
+                self.set_status_err("Enter a weekly allowance above $0.00, or leave it blank.");
+                return;
+            }
+            if !valid_cents(cents) {
+                self.set_status_err("Enter a smaller weekly allowance.");
+                return;
+            }
+            match current {
+                Some(allowance) if allowance.amount_cents == cents => return,
+                Some(mut allowance) => {
+                    allowance.amount_cents = cents;
+                    self.selected_wallet_mut().weekly_allowance = Some(allowance);
+                    format!(
+                        "Weekly allowance for {wallet_name} is now {} every {}.",
+                        format_money(cents),
+                        allowance.weekday_name()
+                    )
+                }
+                None => {
+                    let allowance = WeeklyAllowance::starting(cents, today);
+                    self.selected_wallet_mut().weekly_allowance = Some(allowance);
+                    format!(
+                        "Weekly allowance of {} turned on for {wallet_name}. It posts every {}, starting {}.",
+                        format_money(cents),
+                        allowance.weekday_name(),
+                        format_ledger_date(today + chrono::Duration::weeks(1))
+                    )
+                }
+            }
+        };
+
+        self.prefill_settings_from_selected();
+        self.save_with_success(status);
+    }
+
     fn rename_selected_child(&mut self) {
         if !self.can_change("Unlock parent mode before renaming wallets.") {
             return;
@@ -1800,6 +1999,7 @@ impl CofferlyApp {
             child_name: name.clone(),
             starting_balance_cents: 0,
             entries: Vec::new(),
+            weekly_allowance: None,
         });
         self.select_wallet(self.data.wallets.len() - 1);
         self.new_child_name_input.clear();
@@ -2145,7 +2345,7 @@ impl CofferlyApp {
                 self.raw_bytes = Some(restore.bytes);
                 self.save_enabled = true;
                 self.lock_mode = LockMode::Story;
-                self.apply_unlock(data, session);
+                let allowance = self.apply_unlock(data, session);
                 let kept = kept
                     .and_then(|path| {
                         path.file_name()
@@ -2153,11 +2353,20 @@ impl CofferlyApp {
                     })
                     .map(|name| format!(" The previous vault was kept as {name}."))
                     .unwrap_or_default();
-                self.set_status_ok(format!(
+                let restored = format!(
                     "Restored {} from {}.{kept}",
                     wallet_count_label(count),
                     restore.file_name
-                ));
+                );
+                match allowance {
+                    Some(status) => {
+                        self.status = Status {
+                            text: format!("{restored} {}", status.text),
+                            severity: status.severity,
+                        }
+                    }
+                    None => self.set_status_ok(restored),
+                }
             }
             Err(err) => {
                 self.lock_mode = restore.return_mode;
@@ -2671,7 +2880,15 @@ pub(crate) fn show_live_status(
     response
 }
 
-pub(crate) fn wallet_count_label(count: usize) -> String {
+pub(crate) fn allowance_entry_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 entry".to_owned()
+    } else {
+        format!("{count} entries")
+    }
+}
+
+fn wallet_count_label(count: usize) -> String {
     if count == 1 {
         "1 wallet".to_owned()
     } else {
@@ -2963,6 +3180,7 @@ mod app_tests {
             pending_ledger_filter_focus: false,
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
+            weekly_allowance_input: String::new(),
             child_name_input: String::new(),
             new_child_name_input: String::new(),
             pin_digits: Default::default(),
@@ -3448,6 +3666,7 @@ mod app_tests {
             child_name: "Second".to_owned(),
             starting_balance_cents: 0,
             entries: Vec::new(),
+            weekly_allowance: None,
         });
 
         app.begin_entry_edit(0);
@@ -4158,6 +4377,7 @@ mod app_tests {
                 child_name: format!("Child {}", index + 1),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             });
         }
         let secret = "coffer-story-v1:test-regression-secret";
@@ -4214,16 +4434,19 @@ mod app_tests {
                 child_name: "Alice".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Charlie".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
         ];
         let session = SessionCrypto::establish("test-secret").unwrap();
@@ -4255,11 +4478,13 @@ mod app_tests {
                 child_name: "Alice".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
         ];
         let session = SessionCrypto::establish("test-secret").unwrap();
@@ -4283,11 +4508,13 @@ mod app_tests {
                 child_name: "Alice".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
         ];
         app.select_wallet(1);
@@ -4318,11 +4545,13 @@ mod app_tests {
                 child_name: "Alice".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
+                weekly_allowance: None,
             },
         ];
 
@@ -5681,5 +5910,209 @@ mod app_tests {
 
         app.starting_balance_input = "5.00".to_owned();
         assert!(app.starting_balance_save_ready());
+    }
+
+    mod weekly_allowance {
+        use super::*;
+        use crate::data::{WeeklyAllowance, WEEKLY_ALLOWANCE_DESCRIPTION};
+
+        const SECRET: &str = "test-secret";
+
+        fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+            NaiveDate::from_ymd_opt(y, m, d).unwrap()
+        }
+
+        /// Child 1 has a $5 allowance turned on Tuesday 2026-09-01.
+        fn vault_with_allowance() -> AppData {
+            let mut data = default_app_data();
+            data.wallets[0].weekly_allowance =
+                Some(WeeklyAllowance::starting(500, date(2026, 9, 1)));
+            data
+        }
+
+        fn allowance_entries(data: &AppData) -> Vec<NaiveDate> {
+            data.wallets[0]
+                .entries
+                .iter()
+                .filter(|entry| entry.description == WEEKLY_ALLOWANCE_DESCRIPTION)
+                .map(|entry| entry.date)
+                .collect()
+        }
+
+        fn unlock_on(app: &mut CofferlyApp, data: AppData, today: NaiveDate) -> Option<Status> {
+            let session = SessionCrypto::establish(SECRET).unwrap();
+            app.apply_unlock_on(data, session, today)
+        }
+
+        #[test]
+        fn unlock_posts_missed_weeks_saves_them_with_last_posted_and_announces_the_count() {
+            let (mut app, _dir) = test_app();
+
+            let status = unlock_on(&mut app, vault_with_allowance(), date(2026, 9, 23));
+
+            assert!(matches!(
+                status,
+                Some(Status {
+                    severity: StatusSeverity::Success,
+                    ..
+                })
+            ));
+            assert_eq!(
+                app.status.text,
+                "Coffer Story unlocked. Weekly allowance added: 3 entries for Child 1."
+            );
+            let saved = saved_data(&app, SECRET);
+            assert_eq!(
+                allowance_entries(&saved),
+                vec![date(2026, 9, 8), date(2026, 9, 15), date(2026, 9, 22)]
+            );
+            assert_eq!(
+                saved.wallets[0].weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 22)
+            );
+            assert_eq!(allowance_entries(&app.data), allowance_entries(&saved));
+            assert!(saved.wallets[1].entries.is_empty());
+        }
+
+        #[test]
+        fn re_unlocking_the_saved_vault_never_double_posts() {
+            let (mut app, _dir) = test_app();
+            unlock_on(&mut app, vault_with_allowance(), date(2026, 9, 23));
+
+            let reloaded = saved_data(&app, SECRET);
+            let status = unlock_on(&mut app, reloaded, date(2026, 9, 28));
+
+            assert!(status.is_none());
+            assert_eq!(app.status.text, "Coffer Story unlocked.");
+            assert_eq!(allowance_entries(&saved_data(&app, SECRET)).len(), 3);
+        }
+
+        #[test]
+        fn a_failed_save_posts_nothing_so_the_next_unlock_posts_exactly_once() {
+            let (mut app, dir) = test_app();
+            let good_path = app.data_path.clone();
+            app.data_path = unwritable_data_path(&dir);
+
+            let status = unlock_on(&mut app, vault_with_allowance(), date(2026, 9, 23));
+
+            assert!(matches!(
+                status,
+                Some(Status {
+                    severity: StatusSeverity::Error,
+                    ..
+                })
+            ));
+            assert!(app.status.text.contains("Weekly allowance was not added"));
+            assert!(allowance_entries(&app.data).is_empty());
+            assert_eq!(
+                app.data.wallets[0].weekly_allowance.unwrap().last_posted,
+                date(2026, 9, 1),
+                "in-memory ledger must not keep entries the vault never got"
+            );
+
+            app.data_path = good_path;
+            unlock_on(&mut app, vault_with_allowance(), date(2026, 9, 23));
+            let reloaded = saved_data(&app, SECRET);
+            unlock_on(&mut app, reloaded, date(2026, 9, 23));
+            assert_eq!(allowance_entries(&saved_data(&app, SECRET)).len(), 3);
+        }
+
+        #[test]
+        fn the_status_line_says_when_catch_up_was_capped() {
+            let (mut app, _dir) = test_app();
+
+            unlock_on(&mut app, vault_with_allowance(), date(2026, 11, 17));
+
+            assert_eq!(
+                app.status.text,
+                "Coffer Story unlocked. Weekly allowance added: 8 entries for Child 1. \
+                 Catch-up is capped at 8 weeks: Child 1 (3 older weeks skipped)."
+            );
+        }
+
+        #[test]
+        fn posted_entries_can_be_removed_like_any_other() {
+            let (mut app, _dir) = test_app();
+            unlock_on(&mut app, vault_with_allowance(), date(2026, 9, 9));
+            assert_eq!(app.data.wallets[0].entries.len(), 1);
+
+            app.remove_latest_entry();
+
+            assert!(app.data.wallets[0].entries.is_empty());
+            // Removing it doesn't re-post it: last_posted already covers that week.
+            let reloaded = saved_data(&app, SECRET);
+            unlock_on(&mut app, reloaded, date(2026, 9, 9));
+            assert!(saved_data(&app, SECRET).wallets[0].entries.is_empty());
+        }
+
+        #[test]
+        fn settings_turn_on_with_todays_weekday_change_amount_and_turn_off() {
+            let (mut app, _dir) = test_app();
+            app.parent_unlocked = true;
+            app.session = Some(SessionCrypto::establish(SECRET).unwrap());
+            app.prefill_settings_from_selected();
+            assert_eq!(app.weekly_allowance_input, "");
+            assert!(
+                !app.weekly_allowance_save_ready(),
+                "blank while off is not a change"
+            );
+
+            app.weekly_allowance_input = "5".to_owned();
+            assert!(app.weekly_allowance_save_ready());
+            app.save_weekly_allowance_on(date(2026, 9, 24));
+            let on = app.selected_wallet().weekly_allowance.unwrap();
+            assert_eq!(on, WeeklyAllowance::starting(500, date(2026, 9, 24)));
+            assert_eq!(on.weekday_name(), "Thursday");
+            assert_eq!(
+                app.status.text,
+                "Weekly allowance of $5.00 turned on for Child 1. It posts every Thursday, starting 10/01/2026."
+            );
+            assert!(
+                app.selected_wallet().entries.is_empty(),
+                "the enable day doesn't post"
+            );
+            assert_eq!(
+                saved_data(&app, SECRET).wallets[0].weekly_allowance,
+                Some(on)
+            );
+
+            // Changing the amount keeps the weekday and last_posted.
+            let mut posted = on;
+            posted.last_posted = date(2026, 10, 8);
+            app.selected_wallet_mut().weekly_allowance = Some(posted);
+            app.weekly_allowance_input = "7.50".to_owned();
+            app.save_weekly_allowance_on(date(2026, 10, 10));
+            let changed = app.selected_wallet().weekly_allowance.unwrap();
+            assert_eq!(changed.amount_cents, 750);
+            assert_eq!(changed.enabled_on, date(2026, 9, 24));
+            assert_eq!(changed.last_posted, date(2026, 10, 8));
+
+            // Blank turns it off; turning it back on starts fresh from that day.
+            app.weekly_allowance_input = "  ".to_owned();
+            assert!(app.weekly_allowance_save_ready());
+            app.save_weekly_allowance_on(date(2026, 10, 10));
+            assert!(app.selected_wallet().weekly_allowance.is_none());
+            assert_eq!(app.status.text, "Weekly allowance turned off for Child 1.");
+
+            app.weekly_allowance_input = "5".to_owned();
+            app.save_weekly_allowance_on(date(2026, 11, 2));
+            assert_eq!(
+                app.selected_wallet().weekly_allowance,
+                Some(WeeklyAllowance::starting(500, date(2026, 11, 2)))
+            );
+        }
+
+        #[test]
+        fn settings_reject_zero_negative_and_oversized_amounts() {
+            let (mut app, _dir) = test_app();
+            app.parent_unlocked = true;
+            for input in ["0", "-5", "abc", "999999999999"] {
+                app.weekly_allowance_input = input.to_owned();
+                assert!(!app.weekly_allowance_save_ready(), "{input}");
+                app.save_weekly_allowance_on(date(2026, 9, 24));
+                assert!(app.selected_wallet().weekly_allowance.is_none(), "{input}");
+                assert_eq!(app.status.severity, StatusSeverity::Error, "{input}");
+            }
+        }
     }
 }
