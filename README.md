@@ -79,6 +79,10 @@ Each time parent mode is unlocked, Cofferly adds one "Weekly allowance" deposit 
 
 Changing the amount only affects future weeks. Turning it off and back on starts fresh from the new day; the weeks it was off are not posted. Allowance entries can be edited or removed like any other entry. Cofferly doesn't post while it's locked or closed.
 
+### Savings goal
+
+In **Settings**, each wallet has an optional **Savings goal** amount. Leave it blank for no goal. When a goal is set, the wallet screen shows a progress bar next to the balance (`$45.00 of $120.00 · $75.00 to go`, or **Goal reached**). A negative balance shows an empty bar. The goal is stored in the encrypted vault with the wallet, so it is included in backup and restore. The printed ledger includes the goal line; CSV export does not.
+
 ## Printing and CSV export
 
 Use **Print this wallet** to print the selected child's ledger, or **Print all wallets** to print every child wallet together.

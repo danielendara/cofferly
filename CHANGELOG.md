@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Optional per-wallet savings goal with a progress bar on the wallet screen and a line on the printed ledger. Older vaults load unchanged (serde default); this ships with the next tagged release.
+
 ### UX
 
 - Print and Export report success in the status chip, and opener failures tell the parent the file was saved and how to open it from the file manager.

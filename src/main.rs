@@ -277,6 +277,8 @@ pub(crate) struct CofferlyApp {
     starting_balance_input: String,
     /// Settings field for the selected wallet's weekly allowance (#179); blank = off.
     weekly_allowance_input: String,
+    /// Settings field for the selected wallet's savings goal (#181); blank = none.
+    savings_goal_input: String,
     child_name_input: String,
     new_child_name_input: String,
     pin_digits: [String; PIN_LENGTH],
@@ -512,6 +514,7 @@ impl CofferlyApp {
             draft,
             starting_balance_input: String::new(),
             weekly_allowance_input: String::new(),
+            savings_goal_input: String::new(),
             child_name_input: String::new(),
             new_child_name_input: String::new(),
             pin_digits: Default::default(),
@@ -1809,9 +1812,11 @@ impl CofferlyApp {
         let allowance = wallet
             .weekly_allowance
             .map(|allowance| allowance.amount_cents);
+        let goal = wallet.savings_goal_cents;
         self.child_name_input = name;
         self.starting_balance_input = format_money_input(starting);
         self.weekly_allowance_input = allowance.map(format_money_input).unwrap_or_default();
+        self.savings_goal_input = goal.map(format_money_input).unwrap_or_default();
     }
 
     fn open_settings(&mut self) {
@@ -1952,6 +1957,63 @@ impl CofferlyApp {
         self.save_with_success(status);
     }
 
+    fn savings_goal_save_ready(&self) -> bool {
+        let current = self.selected_wallet().savings_goal_cents;
+        let input = self.savings_goal_input.trim();
+        if input.is_empty() {
+            return current.is_some();
+        }
+        match parse_dollars_to_cents(input) {
+            Ok(cents) => cents > 0 && valid_cents(cents) && Some(cents) != current,
+            Err(_) => false,
+        }
+    }
+
+    /// One amount field (#181). Blank clears the goal. Zero, negative, and
+    /// amounts outside `MAX_ABSOLUTE_CENTS` are rejected, same as other money.
+    fn save_savings_goal(&mut self) {
+        if !self.can_change("Unlock parent mode before changing the savings goal.") {
+            return;
+        }
+        self.undo = None;
+        self.confirm_delete_wallet = false;
+
+        let wallet_name = self.selected_wallet().child_name.clone();
+        let current = self.selected_wallet().savings_goal_cents;
+        let input = self.savings_goal_input.trim().to_owned();
+
+        let status = if input.is_empty() {
+            if current.is_none() {
+                return;
+            }
+            self.selected_wallet_mut().savings_goal_cents = None;
+            format!("Savings goal cleared for {wallet_name}.")
+        } else {
+            let Ok(cents) = parse_dollars_to_cents(&input) else {
+                self.set_status_err(
+                    "Enter a savings goal like 120 or 120.00, or leave it blank to clear it.",
+                );
+                return;
+            };
+            if cents <= 0 {
+                self.set_status_err("Enter a savings goal above $0.00, or leave it blank.");
+                return;
+            }
+            if !valid_cents(cents) {
+                self.set_status_err("Enter a smaller savings goal.");
+                return;
+            }
+            if Some(cents) == current {
+                return;
+            }
+            self.selected_wallet_mut().savings_goal_cents = Some(cents);
+            format!("Savings goal for {wallet_name} is {}.", format_money(cents))
+        };
+
+        self.prefill_settings_from_selected();
+        self.save_with_success(status);
+    }
+
     fn rename_selected_child(&mut self) {
         if !self.can_change("Unlock parent mode before renaming wallets.") {
             return;
@@ -2000,6 +2062,7 @@ impl CofferlyApp {
             starting_balance_cents: 0,
             entries: Vec::new(),
             weekly_allowance: None,
+            savings_goal_cents: None,
         });
         self.select_wallet(self.data.wallets.len() - 1);
         self.new_child_name_input.clear();
@@ -3181,6 +3244,7 @@ mod app_tests {
             draft: EntryDraft::new(),
             starting_balance_input: String::new(),
             weekly_allowance_input: String::new(),
+            savings_goal_input: String::new(),
             child_name_input: String::new(),
             new_child_name_input: String::new(),
             pin_digits: Default::default(),
@@ -3667,6 +3731,7 @@ mod app_tests {
             starting_balance_cents: 0,
             entries: Vec::new(),
             weekly_allowance: None,
+            savings_goal_cents: None,
         });
 
         app.begin_entry_edit(0);
@@ -4378,6 +4443,7 @@ mod app_tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             });
         }
         let secret = "coffer-story-v1:test-regression-secret";
@@ -4435,18 +4501,21 @@ mod app_tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Charlie".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ];
         let session = SessionCrypto::establish("test-secret").unwrap();
@@ -4479,12 +4548,14 @@ mod app_tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ];
         let session = SessionCrypto::establish("test-secret").unwrap();
@@ -4509,12 +4580,14 @@ mod app_tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ];
         app.select_wallet(1);
@@ -4546,12 +4619,14 @@ mod app_tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Bob".to_owned(),
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ];
 
@@ -6113,6 +6188,108 @@ mod app_tests {
                 assert!(app.selected_wallet().weekly_allowance.is_none(), "{input}");
                 assert_eq!(app.status.severity, StatusSeverity::Error, "{input}");
             }
+        }
+    }
+
+    mod savings_goal {
+        use super::*;
+        use crate::data::SavingsGoalProgress;
+
+        const SECRET: &str = "test-secret";
+
+        fn unlocked() -> (CofferlyApp, TempDir) {
+            let (mut app, dir) = test_app();
+            app.parent_unlocked = true;
+            app.session = Some(SessionCrypto::establish(SECRET).unwrap());
+            app.prefill_settings_from_selected();
+            (app, dir)
+        }
+
+        #[test]
+        fn settings_set_change_and_clear_the_goal_in_the_vault() {
+            let (mut app, _dir) = unlocked();
+            assert_eq!(app.savings_goal_input, "");
+            assert!(
+                !app.savings_goal_save_ready(),
+                "blank while unset is not a change"
+            );
+
+            app.savings_goal_input = "120".to_owned();
+            assert!(app.savings_goal_save_ready());
+            app.save_savings_goal();
+            assert_eq!(app.selected_wallet().savings_goal_cents, Some(12_000));
+            assert_eq!(app.status.text, "Savings goal for Child 1 is $120.00.");
+            assert_eq!(
+                saved_data(&app, SECRET).wallets[0].savings_goal_cents,
+                Some(12_000)
+            );
+            assert_eq!(
+                app.selected_wallet()
+                    .savings_goal_progress()
+                    .unwrap()
+                    .label(),
+                "$0.00 of $120.00 · $120.00 to go"
+            );
+
+            app.selected_wallet_mut().starting_balance_cents = 4_500;
+            assert_eq!(
+                app.selected_wallet().savings_goal_progress().unwrap(),
+                SavingsGoalProgress::from_balance(4_500, 12_000)
+            );
+
+            app.savings_goal_input = "50".to_owned();
+            app.save_savings_goal();
+            assert_eq!(app.selected_wallet().savings_goal_cents, Some(5_000));
+            app.selected_wallet_mut().starting_balance_cents = 5_000;
+            let exact = app.selected_wallet().savings_goal_progress().unwrap();
+            assert!(exact.reached);
+            assert_eq!(exact.fraction, 1.0);
+            assert_eq!(exact.label(), "Goal reached");
+
+            app.selected_wallet_mut().starting_balance_cents = 15_000;
+            let over = app.selected_wallet().savings_goal_progress().unwrap();
+            assert_eq!(over.fraction, 1.0);
+            assert_eq!(over.label(), "Goal reached");
+
+            app.selected_wallet_mut().starting_balance_cents = -200;
+            let negative = app.selected_wallet().savings_goal_progress().unwrap();
+            assert_eq!(negative.fraction, 0.0);
+            assert_eq!(negative.label(), "-$2.00 of $50.00 · $52.00 to go");
+
+            app.savings_goal_input = "  ".to_owned();
+            assert!(app.savings_goal_save_ready());
+            app.save_savings_goal();
+            assert!(app.selected_wallet().savings_goal_cents.is_none());
+            assert!(app.selected_wallet().savings_goal_progress().is_none());
+            assert_eq!(app.status.text, "Savings goal cleared for Child 1.");
+            let cleared = serde_json::to_string(&saved_data(&app, SECRET)).unwrap();
+            assert!(!cleared.contains("savings_goal"));
+        }
+
+        #[test]
+        fn settings_reject_zero_negative_and_oversized_goals() {
+            let (mut app, _dir) = unlocked();
+            for input in ["0", "-5", "abc", "999999999999", "1000000000"] {
+                app.savings_goal_input = input.to_owned();
+                assert!(!app.savings_goal_save_ready(), "{input}");
+                app.save_savings_goal();
+                assert!(
+                    app.selected_wallet().savings_goal_cents.is_none(),
+                    "{input}"
+                );
+                assert_eq!(app.status.severity, StatusSeverity::Error, "{input}");
+            }
+
+            app.savings_goal_input = "999999999.99".to_owned();
+            assert!(app.savings_goal_save_ready());
+            app.save_savings_goal();
+            assert_eq!(
+                app.selected_wallet().savings_goal_cents,
+                Some(crate::data::MAX_ABSOLUTE_CENTS)
+            );
+
+            app.prefill_settings_from_selected();
+            assert!(!app.savings_goal_save_ready());
         }
     }
 }
