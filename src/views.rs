@@ -594,6 +594,7 @@ impl CofferlyApp {
         let wallet = self.selected_wallet();
         let name = wallet.child_name.clone();
         let balance = wallet.current_balance_cents();
+        let goal = wallet.savings_goal_progress();
 
         ui.columns(3, |columns| {
             columns[0].add_space(31.0);
@@ -643,6 +644,32 @@ impl CofferlyApp {
                 );
             });
         });
+
+        if let Some(progress) = goal {
+            let label = progress.label();
+            ui.add_space(8.0);
+            ui.add(
+                egui::ProgressBar::new(progress.fraction)
+                    .desired_height(12.0)
+                    .fill(if progress.reached {
+                        theme::POSITIVE
+                    } else {
+                        theme::ACCENT
+                    })
+                    // Square caps so a 0% (negative or empty) balance stays empty.
+                    .corner_radius(egui::CornerRadius::ZERO),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(label)
+                    .size(13.0)
+                    .color(if progress.reached {
+                        theme::POSITIVE
+                    } else {
+                        theme::TEXT_SECONDARY
+                    }),
+            );
+        }
     }
 
     pub fn show_settings_window(&mut self, ctx: &egui::Context) {
@@ -653,6 +680,7 @@ impl CofferlyApp {
         let selected_name = self.selected_wallet().child_name.clone();
         let starting_balance = self.selected_wallet().starting_balance_cents;
         let weekly_allowance = self.selected_wallet().weekly_allowance;
+        let savings_goal = self.selected_wallet().savings_goal_cents;
         let has_entries = !self.selected_wallet().entries.is_empty();
         let can_delete_wallet = self.data.wallets.len() > 1;
         let modal_width = settings_modal_width(ctx.content_rect().width());
@@ -855,6 +883,40 @@ impl CofferlyApp {
                                         .clicked()
                                     {
                                         self.save_weekly_allowance();
+                                    }
+                                });
+
+                                ui.add_space(12.0);
+                                settings_field_label(ui, "Savings goal");
+                                let goal_hint = match savings_goal {
+                                    Some(cents) => format!(
+                                        "Saving toward {}. Leave blank to clear the goal.",
+                                        format_money(cents)
+                                    ),
+                                    None => "Optional. Leave blank for no goal.".to_owned(),
+                                };
+                                ui.label(
+                                    egui::RichText::new(goal_hint)
+                                        .size(11.0)
+                                        .color(theme::TEXT_SECONDARY),
+                                );
+                                ui.add_space(4.0);
+                                let goal_ready = self.savings_goal_save_ready();
+                                settings_input_action_row(ui, 112.0, |ui, input_width| {
+                                    ui.add_sized(
+                                        [input_width, 38.0],
+                                        egui::TextEdit::singleline(&mut self.savings_goal_input)
+                                            .hint_text("No goal"),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            goal_ready,
+                                            egui::Button::new("Save goal")
+                                                .min_size(egui::vec2(112.0, 38.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.save_savings_goal();
                                     }
                                 });
 
@@ -1993,6 +2055,7 @@ mod ledger_amount_a11y_tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 

@@ -23,11 +23,17 @@ pub fn write_printable_ledger_filtered(
 
     let mut body = String::new();
     for wallet in wallets {
-        let header = format!(
+        let mut header = format!(
             "<section><h1>{}</h1><p class=\"balance\">Current balance: {}</p>",
             escape_html(&wallet.child_name),
             format_money(wallet.current_balance_cents())
         );
+        if let Some(progress) = wallet.savings_goal_progress() {
+            header.push_str(&format!(
+                "<p class=\"goal\">Savings goal: {}</p>",
+                escape_html(&progress.label())
+            ));
+        }
         body.push_str(&header);
 
         body.push_str(
@@ -66,6 +72,7 @@ body {{ font-family: "Segoe UI", Arial, sans-serif; color: #22333b; margin: 36px
 section {{ break-after: page; margin-bottom: 40px; }}
 h1 {{ font-size: 34px; margin: 0 0 6px; }}
 .balance {{ font-size: 20px; font-weight: 700; margin: 0 0 18px; }}
+.goal {{ font-size: 16px; margin: -10px 0 18px; }}
 table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
 th, td {{ border: 1px solid #9aa7ad; padding: 8px 10px; text-align: left; }}
 th {{ background: #e4f3ef; }}
@@ -156,6 +163,7 @@ mod tests {
                 amount_cents: -750,
             }],
             weekly_allowance: None,
+            savings_goal_cents: None,
         }];
 
         let written = write_printable_ledger(&path, &wallets).unwrap();
@@ -168,6 +176,32 @@ mod tests {
         assert!(html.contains("-$7.50"));
         assert!(html.contains("$12.50"));
         assert!(html.contains("window.print()"));
+        assert!(!html.contains("Savings goal"));
+    }
+
+    #[test]
+    fn printable_ledger_includes_the_savings_goal_when_set() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.html");
+        let mut wallets = sample_wallets();
+        wallets[0].savings_goal_cents = Some(12_000);
+        wallets[0].starting_balance_cents = 4_500;
+        wallets[0].entries.clear();
+
+        let html =
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+        assert!(html.contains("Savings goal: $45.00 of $120.00 · $75.00 to go"));
+        assert!(!html.contains("Goal reached"));
+
+        wallets[0].starting_balance_cents = 12_000;
+        let reached =
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+        assert!(reached.contains("Savings goal: Goal reached"));
+
+        wallets[0].savings_goal_cents = None;
+        let cleared =
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+        assert!(!cleared.contains("Savings goal"));
     }
 
     #[test]
@@ -222,6 +256,7 @@ mod tests {
                     },
                 ],
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Child 2".to_owned(),
@@ -232,6 +267,7 @@ mod tests {
                     amount_cents: -300,
                 }],
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ]
     }

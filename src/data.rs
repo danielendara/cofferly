@@ -31,6 +31,11 @@ pub struct Wallet {
     /// also serialize unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekly_allowance: Option<WeeklyAllowance>,
+    /// Optional amount this wallet is saving toward (#181). `None` = no goal.
+    /// Defaulted so older vaults and backups load unchanged, and omitted when
+    /// unset so they also serialize unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub savings_goal_cents: Option<i64>,
 }
 
 /// A wallet's weekly allowance. Dates are calendar dates (`NaiveDate` from the
@@ -66,6 +71,57 @@ impl WeeklyAllowance {
 
     pub fn weekday_name(&self) -> String {
         self.enabled_on.format("%A").to_string()
+    }
+}
+
+/// How close a balance is to a savings goal. Fraction is clamped to `0.0..=1.0`;
+/// a negative balance is 0% and does not wrap the remaining amount.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SavingsGoalProgress {
+    pub balance_cents: i64,
+    pub goal_cents: i64,
+    pub fraction: f32,
+    pub reached: bool,
+    /// Cents still needed. `0` once the balance is at or above the goal.
+    pub remaining_cents: i64,
+}
+
+impl SavingsGoalProgress {
+    pub fn from_balance(balance_cents: i64, goal_cents: i64) -> Self {
+        let reached = goal_cents > 0 && balance_cents >= goal_cents;
+        let fraction = if goal_cents <= 0 || balance_cents <= 0 {
+            0.0
+        } else if reached {
+            1.0
+        } else {
+            ((balance_cents as f64 / goal_cents as f64).clamp(0.0, 1.0)) as f32
+        };
+        let remaining_cents = if reached {
+            0
+        } else {
+            goal_cents.saturating_sub(balance_cents)
+        };
+        Self {
+            balance_cents,
+            goal_cents,
+            fraction,
+            reached,
+            remaining_cents,
+        }
+    }
+
+    /// "$45.00 of $120.00 · $75.00 to go", or "Goal reached" at/above the goal.
+    pub fn label(self) -> String {
+        if self.reached {
+            "Goal reached".to_owned()
+        } else {
+            format!(
+                "{} of {} · {} to go",
+                crate::money::format_money(self.balance_cents),
+                crate::money::format_money(self.goal_cents),
+                crate::money::format_money(self.remaining_cents)
+            )
+        }
     }
 }
 
@@ -209,7 +265,26 @@ impl Wallet {
     }
 
     pub fn balances_are_valid(&self) -> bool {
-        self.checked_running_balances().is_some()
+        let goal_ok = match self.savings_goal_cents {
+            None => true,
+            // Same bound as other money fields: reject a non-positive or
+            // out-of-range goal instead of storing a wrapped value.
+            Some(cents) => cents > 0 && valid_cents(cents),
+        };
+        goal_ok && self.checked_running_balances().is_some()
+    }
+
+    /// Progress toward [`Self::savings_goal_cents`]. `None` when no positive
+    /// in-range goal is set.
+    pub fn savings_goal_progress(&self) -> Option<SavingsGoalProgress> {
+        let goal_cents = self.savings_goal_cents?;
+        if goal_cents <= 0 || !valid_cents(goal_cents) {
+            return None;
+        }
+        Some(SavingsGoalProgress::from_balance(
+            self.current_balance_cents(),
+            goal_cents,
+        ))
     }
 
     fn checked_running_balances(&self) -> Option<Vec<i64>> {
@@ -399,6 +474,7 @@ pub fn default_wallets() -> Vec<Wallet> {
             starting_balance_cents: 0,
             entries: Vec::new(),
             weekly_allowance: None,
+            savings_goal_cents: None,
         })
         .collect()
 }
@@ -556,6 +632,7 @@ mod tests {
                 starting_balance_cents: MAX_ABSOLUTE_CENTS + 1,
                 entries: Vec::new(),
                 weekly_allowance: None,
+                savings_goal_cents: None,
             }],
         };
 
@@ -575,6 +652,7 @@ mod tests {
                     amount_cents: 1,
                 }],
                 weekly_allowance: None,
+                savings_goal_cents: None,
             }],
         };
 
@@ -604,6 +682,7 @@ mod tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         let rows = wallet.ledger_rows_sorted(LedgerSort::NewestFirst);
@@ -635,6 +714,7 @@ mod tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         let rows = wallet.ledger_rows_sorted(LedgerSort::OldestFirst);
@@ -665,6 +745,7 @@ mod tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         }
     }
 
@@ -757,6 +838,7 @@ mod tests {
             starting_balance_cents: 500,
             entries: Vec::new(),
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         assert!(wallet.latest_deposit().is_none());
@@ -773,6 +855,7 @@ mod tests {
                 amount_cents: -200,
             }],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         assert!(wallet.latest_deposit().is_none());
@@ -801,6 +884,7 @@ mod tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         let latest = wallet.latest_deposit().unwrap();
@@ -826,6 +910,7 @@ mod tests {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         };
 
         let latest = wallet.latest_deposit().unwrap();
@@ -847,6 +932,7 @@ mod tests {
                 starting_balance_cents: 0,
                 entries: Vec::new(),
                 weekly_allowance: allowance,
+                savings_goal_cents: None,
             }
         }
 
@@ -1062,6 +1148,108 @@ mod tests {
             assert!(json.contains(r#""weekly_allowance":{"amount_cents":500,"enabled_on":"2026-09-01","last_posted":"2026-09-01"}"#));
             let back: AppData = serde_json::from_str(&json).unwrap();
             assert_eq!(back.wallets[0].weekly_allowance, Some(enabled()));
+            assert!(back.wallets[0].savings_goal_cents.is_none());
+            assert!(!json.contains("savings_goal"));
         }
+    }
+
+    fn goal_wallet(starting_balance_cents: i64, savings_goal_cents: Option<i64>) -> Wallet {
+        Wallet {
+            child_name: "Ada".to_owned(),
+            starting_balance_cents,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents,
+        }
+    }
+
+    #[test]
+    fn old_vault_without_a_savings_goal_loads_and_saves_byte_for_byte() {
+        let legacy = r#"{"wallets":[{"child_name":"Ada","starting_balance_cents":100,"entries":[{"date":"2026-09-01","description":"Weekly allowance","amount_cents":500}]}]}"#;
+        let data: AppData = serde_json::from_str(legacy).unwrap();
+        assert!(data.wallets[0].savings_goal_cents.is_none());
+        assert!(data.wallets[0].weekly_allowance.is_none());
+        assert_eq!(serde_json::to_string(&data).unwrap(), legacy);
+
+        let mut with_goal = data.clone();
+        with_goal.wallets[0].savings_goal_cents = Some(12_000);
+        let json = serde_json::to_string(&with_goal).unwrap();
+        assert_eq!(
+            json,
+            r#"{"wallets":[{"child_name":"Ada","starting_balance_cents":100,"entries":[{"date":"2026-09-01","description":"Weekly allowance","amount_cents":500}],"savings_goal_cents":12000}]}"#
+        );
+        let back: AppData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.wallets[0].savings_goal_cents, Some(12_000));
+
+        let mut cleared = back;
+        cleared.wallets[0].savings_goal_cents = None;
+        assert_eq!(serde_json::to_string(&cleared).unwrap(), legacy);
+    }
+
+    #[test]
+    fn rejects_loaded_savings_goals_outside_the_money_range() {
+        for goal in [Some(0), Some(-1), Some(MAX_ABSOLUTE_CENTS + 1)] {
+            let data = AppData {
+                parent_pin: "1234".to_owned(),
+                wallets: vec![goal_wallet(0, goal)],
+            };
+            assert!(normalize_app_data(data).is_none(), "{goal:?}");
+        }
+
+        let ok = AppData {
+            parent_pin: "1234".to_owned(),
+            wallets: vec![goal_wallet(0, Some(MAX_ABSOLUTE_CENTS))],
+        };
+        assert!(normalize_app_data(ok).is_some());
+    }
+
+    #[test]
+    fn savings_goal_progress_covers_zero_partial_reached_over_and_negative() {
+        let goal = 12_000;
+
+        let zero = SavingsGoalProgress::from_balance(0, goal);
+        assert_eq!(zero.fraction, 0.0);
+        assert!(!zero.reached);
+        assert_eq!(zero.remaining_cents, goal);
+        assert_eq!(zero.label(), "$0.00 of $120.00 · $120.00 to go");
+
+        let partial = SavingsGoalProgress::from_balance(4_500, goal);
+        assert_eq!(partial.fraction, 0.375);
+        assert!(!partial.reached);
+        assert_eq!(partial.remaining_cents, 7_500);
+        assert_eq!(partial.label(), "$45.00 of $120.00 · $75.00 to go");
+
+        let exact = SavingsGoalProgress::from_balance(goal, goal);
+        assert_eq!(exact.fraction, 1.0);
+        assert!(exact.reached);
+        assert_eq!(exact.remaining_cents, 0);
+        assert_eq!(exact.label(), "Goal reached");
+
+        let over = SavingsGoalProgress::from_balance(15_000, goal);
+        assert_eq!(over.fraction, 1.0);
+        assert!(over.reached);
+        assert_eq!(over.remaining_cents, 0);
+        assert_eq!(over.label(), "Goal reached");
+
+        let negative = SavingsGoalProgress::from_balance(-500, goal);
+        assert_eq!(negative.fraction, 0.0);
+        assert!(!negative.reached);
+        assert_eq!(negative.remaining_cents, 12_500);
+        assert_eq!(negative.label(), "-$5.00 of $120.00 · $125.00 to go");
+
+        // A negative balance near i64::MIN must not wrap the remainder.
+        let extreme = SavingsGoalProgress::from_balance(i64::MIN, goal);
+        assert_eq!(extreme.fraction, 0.0);
+        assert_eq!(extreme.remaining_cents, i64::MAX);
+
+        let mut wallet = goal_wallet(4_500, None);
+        assert!(wallet.savings_goal_progress().is_none());
+        wallet.savings_goal_cents = Some(goal);
+        assert_eq!(
+            wallet.savings_goal_progress().unwrap().label(),
+            "$45.00 of $120.00 · $75.00 to go"
+        );
+        wallet.savings_goal_cents = None;
+        assert!(wallet.savings_goal_progress().is_none());
     }
 }

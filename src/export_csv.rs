@@ -94,6 +94,7 @@ mod tests {
                 amount_cents: -750,
             }],
             weekly_allowance: None,
+            savings_goal_cents: None,
         }];
 
         let written = write_csv_ledger(&path, &wallets).unwrap();
@@ -113,6 +114,25 @@ mod tests {
     }
 
     #[test]
+    fn csv_is_unchanged_when_a_wallet_has_a_savings_goal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.csv");
+        let mut wallets = vec![Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 2_000,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        }];
+        let without = std::fs::read_to_string(write_csv_ledger(&path, &wallets).unwrap()).unwrap();
+        wallets[0].savings_goal_cents = Some(12_000);
+        let with_goal =
+            std::fs::read_to_string(write_csv_ledger(&path, &wallets).unwrap()).unwrap();
+        assert_eq!(with_goal, without);
+        assert!(!with_goal.to_lowercase().contains("goal"));
+    }
+
+    #[test]
     fn guards_formula_trigger_characters_in_text_fields_but_not_amounts() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.csv");
@@ -125,6 +145,7 @@ mod tests {
                 amount_cents: -750,
             }],
             weekly_allowance: None,
+            savings_goal_cents: None,
         }];
 
         let written = write_csv_ledger(&path, &wallets).unwrap();
@@ -176,6 +197,7 @@ mod tests {
                     },
                 ],
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
             Wallet {
                 child_name: "Child 2".to_owned(),
@@ -186,6 +208,7 @@ mod tests {
                     amount_cents: -300,
                 }],
                 weekly_allowance: None,
+                savings_goal_cents: None,
             },
         ];
 

@@ -195,6 +195,7 @@ fn demo_wallets() -> Vec<Wallet> {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         },
         Wallet {
             child_name: "Child 2".to_owned(),
@@ -217,6 +218,7 @@ fn demo_wallets() -> Vec<Wallet> {
                 },
             ],
             weekly_allowance: None,
+            savings_goal_cents: None,
         },
     ]
 }
