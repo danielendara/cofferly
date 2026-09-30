@@ -6,9 +6,9 @@ Use this checklist when preparing a Cofferly release.
 
 ```powershell
 cargo fmt -- --check
-cargo test
+cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
-cargo build --release
+cargo build --release --locked
 .\scripts\package-windows.ps1 -Version 0.3.0
 ```
 
@@ -79,12 +79,19 @@ Before publishing, open Cofferly and verify:
 - Adding a deposit changes the running balance.
 - Adding a deduction changes the running balance.
 - Remove latest entry offers undo.
+- Optional weekly allowance in Settings posts missed weeks on unlock (status line reports count; at most eight weeks per unlock).
+- Optional savings goal in Settings shows progress on the wallet screen and on the printed ledger (not in CSV).
+- Money-out that would leave the wallet below $0 asks for a second confirm before it is recorded.
+- Entry description shows a live character count; invalid dates focus the Date field.
+- With focus in the sidebar or ledger, ↑/↓ or `[`/`]` switch wallets and announce name and balance.
 - Changing the Coffer Story saves and unlocks with the new story.
 - A current encrypted `data.json` is copied to `vault.cofferly`, verifies successfully, and remains in place as a backup.
 - When both data files exist, `vault.cofferly` takes precedence and neither file is modified during startup.
 - Print this wallet opens a printable browser page.
 - Print all wallets opens every wallet in one printable page.
 - Export this wallet CSV and Export all wallets CSV open a local spreadsheet file (no `$` in amounts).
+- Back up vault writes a verified `Cofferly-backup-YYYY-MM-DD.cofferly` and shows Last backup in Settings.
+- Restore from backup previews wallets, confirms before replace, and keeps `vault.pre-restore-<timestamp>.cofferly`.
 - The date field defaults to today; a past date is accepted; a future date is rejected.
 - Remove latest entry removes the newest-dated row when the ledger is backdated.
 - Settings shows the Cofferly version next to the save reminder.

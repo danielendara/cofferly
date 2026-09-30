@@ -4,7 +4,8 @@
 
 ### Features
 
-- Optional per-wallet savings goal with a progress bar on the wallet screen and a line on the printed ledger. Older vaults load unchanged (serde default); this ships with the next tagged release.
+- Optional per-wallet **weekly allowance** with weekday catch-up on parent unlock (at most eight missed weeks per unlock). Older vaults load unchanged (serde default).
+- Optional per-wallet **savings goal** with a progress bar on the wallet screen and a line on the printed ledger. Older vaults load unchanged (serde default). CSV export is unchanged.
 
 ### UX
 
@@ -66,7 +67,7 @@ CSV export, backdated entries, grouped money, and Coffer Story / Settings harden
 ### CI and packaging
 
 - Multi-OS test/clippy/fmt workflow plus `cargo audit` on PRs and `main`.
-- Coverage report and 74% line floor (excluding UI-only `views.rs` and screenshot `capture.rs`).
+- Coverage report and a line-coverage floor enforced in CI (excluding UI-only `views.rs` and screenshot `capture.rs`).
 - Release workflow compiles the Inno Setup installer and attaches zip + Setup.exe to the GitHub Release.
 - README: macOS/Linux `cargo run` / `cargo build --release` notes; primary Download links to GitHub Releases; recovery-card guidance and PIN→Story upgrade notes.
 - Refreshes README screenshots for Coffer Story unlock, sample ledger, and Settings; removes the obsolete PIN-screen asset.
