@@ -19,9 +19,10 @@ Cofferly starts with two neutral child wallets. Each wallet keeps a local ledger
 - Starting balance
 - Money added
 - Money spent
-- Description for each entry
+- Description for each entry (up to 100 characters)
 - Date
 - Automatic running balance
+- A second confirm before money-out that would drop the balance below $0
 - Coffer Story parent unlock
 - Printable ledgers
 - Custom child wallet names
