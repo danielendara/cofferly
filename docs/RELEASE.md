@@ -9,8 +9,10 @@ cargo fmt -- --check
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --release --locked
-.\scripts\package-windows.ps1 -Version 0.3.0
+.\scripts\package-windows.ps1
 ```
+
+The version defaults to the `Cargo.toml` version (the source of truth); pass `-Version x.y.z` to override it and `-SkipBuild` to skip the rebuild when `target\release\Cofferly.exe` is already fresh.
 
 The portable zip will be created in `dist/`.
 
@@ -36,7 +38,7 @@ The repository includes `installer/Cofferly.iss` for Inno Setup.
 
 ### CI (preferred)
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the portable zip, compiles the installer with Inno Setup, and attaches both to the GitHub Release.
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the portable zip, compiles the installer with Inno Setup, and attaches both to the GitHub Release. Starting the workflow manually via `workflow_dispatch` builds the same artifacts without attaching them to a Release (build artifacts only). The version is resolved once per run: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
 
 ### Local
 
@@ -52,11 +54,12 @@ Output is written to `dist/` (`Cofferly-{version}-Setup.exe`).
 
 ## GitHub Release
 
-1. Update `Cargo.toml`, `README.md`, installer default version, and this checklist if the version changes.
+1. `Cargo.toml` is the version source of truth. If the version changes, update `Cargo.toml`, `README.md`, the installer default version, and this checklist.
 2. Refresh the README screenshots in `docs/screenshots/` if the UI changed.
 3. Commit the release and merge to `main`.
 4. Tag it, for example `v0.3.0`, and push the tag.
 5. Confirm the Release workflow attached `Cofferly-*-windows-x64.zip` and `Cofferly-*-Setup.exe`.
+6. After tagging, refresh the current-state paragraph in `docs/RECOVERY.md`.
 
 ## Repository Controls
 

@@ -1,4 +1,6 @@
 #define MyAppName "Cofferly"
+; Local-build default only; release.yml passes /DMyAppVersion=<version>,
+; which wins via the guard below. Keep this in sync with the Cargo.toml version.
 #ifndef MyAppVersion
   #define MyAppVersion "0.3.0"
 #endif

@@ -6,7 +6,7 @@ Cofferly is **public**. You remain the only admin. Production releases stay on G
 
 | Actor | Push `main` | Merge PRs | Change settings | Publish a release |
 |-------|-------------|-----------|-----------------|-------------------|
-| Maintainer (`danielendara`) | Via PR + CI (admin bypass only for emergencies) | Yes | Yes | Yes (`v*` tag / workflow_dispatch) |
+| Maintainer (`danielendara`) | Via PR + CI (admin bypass only for emergencies) | Yes | Yes | Yes (`v*` tag publishes; `workflow_dispatch` builds artifacts only) |
 | Outside PR / fork | No | No | No | No |
 | Dependabot | Opens PRs only | No | No | No |
 

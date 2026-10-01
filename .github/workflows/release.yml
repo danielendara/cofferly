@@ -25,6 +25,20 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Resolve release version
+        id: resolve-version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref }}" -replace '^refs/tags/v', ''
+          if ("${{ github.ref }}" -notlike 'refs/tags/v*') {
+            $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          }
+          if ([string]::IsNullOrWhiteSpace($version)) { throw "Could not resolve release version" }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Check formatting
         run: cargo fmt -- --check
 
@@ -36,7 +50,7 @@ jobs:
 
       - name: Package portable zip
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -Version "${{ github.ref_name }}"
+        run: ./scripts/package-windows.ps1 -Version "${{ steps.resolve-version.outputs.version }}" -SkipBuild
 
       - name: Install Inno Setup
         shell: pwsh
@@ -53,11 +67,7 @@ jobs:
       - name: Compile Windows installer
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          if ([string]::IsNullOrWhiteSpace($version) -or $version -eq '${{ github.ref_name }}') {
-            $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
-          }
-          & "$env:ISCC" "/DMyAppVersion=$version" installer\Cofferly.iss
+          & "$env:ISCC" "/DMyAppVersion=${{ steps.resolve-version.outputs.version }}" installer\Cofferly.iss
           Get-ChildItem dist\*.exe
 
       - name: Upload portable + installer artifacts
