@@ -14,7 +14,6 @@ use crate::data::{
 use crate::money::format_money;
 use crate::money::format_money_input;
 use crate::theme;
-use crate::theme::amount_color;
 use crate::theme::balance_color;
 use crate::{CofferlyApp, EntryFormField, LockMode};
 use crate::{StatusSeverity, APP_NAME, APP_VERSION, PIN_LENGTH};
@@ -296,10 +295,36 @@ impl CofferlyApp {
                         self.restore_confirm_panel(ui);
                         return;
                     }
-                    let is_reveal = matches!(self.lock_mode, LockMode::SetupReveal | LockMode::MigrateReveal | LockMode::ChangeReveal);
-                    let is_migration = matches!(self.lock_mode, LockMode::MigrateReveal | LockMode::MigrateConfirm);
-                    let is_change = matches!(self.lock_mode, LockMode::ChangeReveal | LockMode::ChangeConfirm);
-                    let heading = if is_reveal { if is_migration { "Move to Coffer Story" } else if is_change { "Your replacement Coffer Story" } else { "Your new Coffer Story" } } else if matches!(self.lock_mode, LockMode::SetupConfirm | LockMode::MigrateConfirm | LockMode::ChangeConfirm) { "Confirm your Coffer Story" } else if self.restore.is_some() { "Unlock the backup" } else { "Welcome back" };
+                    let is_reveal = matches!(
+                        self.lock_mode,
+                        LockMode::SetupReveal | LockMode::MigrateReveal | LockMode::ChangeReveal
+                    );
+                    let is_migration = matches!(
+                        self.lock_mode,
+                        LockMode::MigrateReveal | LockMode::MigrateConfirm
+                    );
+                    let is_change = matches!(
+                        self.lock_mode,
+                        LockMode::ChangeReveal | LockMode::ChangeConfirm
+                    );
+                    let heading = if is_reveal {
+                        if is_migration {
+                            "Move to Coffer Story"
+                        } else if is_change {
+                            "Your replacement Coffer Story"
+                        } else {
+                            "Your new Coffer Story"
+                        }
+                    } else if matches!(
+                        self.lock_mode,
+                        LockMode::SetupConfirm | LockMode::MigrateConfirm | LockMode::ChangeConfirm
+                    ) {
+                        "Confirm your Coffer Story"
+                    } else if self.restore.is_some() {
+                        "Unlock the backup"
+                    } else {
+                        "Welcome back"
+                    };
                     ui.label(egui::RichText::new(heading).size(20.0).strong().color(theme::TEXT_PRIMARY));
                     if let Some(restore) = &self.restore {
                         ui.label(egui::RichText::new(format!("Choose the Coffer Story that was used for {}. Nothing on this PC changes until you confirm.", restore.file_name)).size(13.0).color(theme::LOCK_TEXT_SECONDARY));
@@ -308,14 +333,49 @@ impl CofferlyApp {
                         ui.label(egui::RichText::new("Cofferly generated this six-object key. Keep it private — it unlocks your encrypted ledger.").size(13.0).color(theme::LOCK_TEXT_SECONDARY));
                         ui.add_space(12.0);
                         if let Some(story) = self.pending_story {
-                            ui.horizontal_wrapped(|ui| for (index, id) in story.iter().enumerate() { ui.group(|ui| { ui.label(egui::RichText::new(format!("{}", index + 1)).strong().color(theme::GOLD_DARK)); ui.label(egui::RichText::new(crate::story::label(id).unwrap_or(id)).size(16.0).strong().color(theme::TEXT_PRIMARY)); }); });
+                            ui.horizontal_wrapped(|ui| {
+                                for (index, id) in story.iter().enumerate() {
+                                    ui.group(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!("{}", index + 1))
+                                                .strong()
+                                                .color(theme::GOLD_DARK),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(crate::story::label(id).unwrap_or(id))
+                                                .size(16.0)
+                                                .strong()
+                                                .color(theme::TEXT_PRIMARY),
+                                        );
+                                    });
+                                }
+                            });
                         }
                         ui.add_space(10.0);
                         ui.label(egui::RichText::new("Write or print this recovery key and store it away from the computer. Without it, the encrypted ledger cannot be recovered.").size(12.0).color(theme::NEGATIVE));
                         ui.horizontal(|ui| {
                             if ui.button("Generate another story").clicked() { self.regenerate_story(); }
                             if ui.button("Print recovery card").clicked() { self.print_recovery_card(); }
-                            if ui.add(egui::Button::new(egui::RichText::new("I wrote it down — continue").strong().color(egui::Color32::WHITE)).fill(theme::ACCENT_DARK)).clicked() { self.lock_mode = if is_migration { LockMode::MigrateConfirm } else if is_change { LockMode::ChangeConfirm } else { LockMode::SetupConfirm }; self.reset_story_entry(); }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("I wrote it down — continue")
+                                            .strong()
+                                            .color(egui::Color32::WHITE),
+                                    )
+                                    .fill(theme::ACCENT_DARK),
+                                )
+                                .clicked()
+                            {
+                                self.lock_mode = if is_migration {
+                                    LockMode::MigrateConfirm
+                                } else if is_change {
+                                    LockMode::ChangeConfirm
+                                } else {
+                                    LockMode::SetupConfirm
+                                };
+                                self.reset_story_entry();
+                            }
                             if is_migration && ui.button("Cancel migration").clicked() { self.cancel_story_migration(); }
                             if is_change && ui.button("Cancel").clicked() { self.cancel_story_change(); }
                         });
@@ -326,8 +386,26 @@ impl CofferlyApp {
                         }
                     } else {
                         let cooldown = self.unlock_cooldown_remaining();
-                        if let Some(remaining) = cooldown { ui.ctx().request_repaint_after(remaining.min(std::time::Duration::from_secs(1))); ui.label(egui::RichText::new(format!("Try again in {}", crate::format_cooldown(remaining))).color(theme::NEGATIVE)); }
-                        else { ui.label(egui::RichText::new("Choose the six objects in order. The grid reshuffles each time; Cofferly never reveals partial correctness.").size(13.0).color(theme::LOCK_TEXT_SECONDARY)); }
+                        if let Some(remaining) = cooldown {
+                            ui.ctx().request_repaint_after(
+                                remaining.min(std::time::Duration::from_secs(1)),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Try again in {}",
+                                    crate::format_cooldown(remaining)
+                                ))
+                                .color(theme::NEGATIVE),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Choose the six objects in order. The grid reshuffles each time; Cofferly never reveals partial correctness.",
+                                )
+                                .size(13.0)
+                                .color(theme::LOCK_TEXT_SECONDARY),
+                            );
+                        }
                         ui.add_space(8.0);
                         // `horizontal_centered` expands to the remaining height in egui.
                         // The desktop card is fixed-width, so center this known-width row
@@ -1480,12 +1558,11 @@ impl CofferlyApp {
         let mut edit_request: Option<usize> = None;
         let mut toggle_sort = false;
         const ROW_HEIGHT: f32 = 42.0;
-        let query = self.ledger_filter.trim().to_owned();
         let summary = ledger_filter_summary(&rows, &self.ledger_filter);
         let filtered_rows = summary.rows;
         let matching_entry_count = summary.matching_entry_count;
         let matching_net_cents = summary.matching_net_cents;
-        let no_matches = !query.is_empty() && matching_entry_count == 0;
+        let no_matches = !self.ledger_filter.trim().is_empty() && matching_entry_count == 0;
 
         ui.horizontal(|ui| {
             if self.pending_ledger_filter_focus {
@@ -1526,11 +1603,6 @@ impl CofferlyApp {
             }
         });
         ui.add_space(8.0);
-
-        // Display-only filter: narrows which cached rows are rendered below
-        // without mutating `Wallet::entries`, re-sorting, or touching
-        // `ledger_cache`. The starting-balance row is always kept regardless
-        // of the query -- see `ledger_filter_summary` in `data.rs`.
 
         egui_extras::TableBuilder::new(ui)
             .striped(true)
@@ -1654,7 +1726,7 @@ impl CofferlyApp {
                             ledger_amount_accessible_name(ledger_row.amount_cents, is_start);
                         let amt = egui::RichText::new(amount_text)
                             .size(if is_start { 10.0 } else { 11.0 })
-                            .color(amount_color(ledger_row.amount_cents));
+                            .color(balance_color(ledger_row.amount_cents));
                         ui.label(amt).widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Label,
@@ -1717,10 +1789,13 @@ impl CofferlyApp {
         if no_matches {
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new(format!("No entries match \"{query}\""))
-                    .size(12.0)
-                    .italics()
-                    .color(theme::TEXT_SECONDARY),
+                egui::RichText::new(format!(
+                    "No entries match \"{}\"",
+                    self.ledger_filter.trim()
+                ))
+                .size(12.0)
+                .italics()
+                .color(theme::TEXT_SECONDARY),
             );
         }
 

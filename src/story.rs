@@ -61,6 +61,11 @@ fn sample_below(
     }
 }
 
+fn sys_rng_next_u64(context: &'static str) -> impl FnMut() -> Result<u64, String> {
+    let mut rng = SysRng;
+    move || rng.try_next_u64().map_err(|e| format!("{context}: {e}"))
+}
+
 fn shuffled_ids(
     next_u64: &mut impl FnMut() -> Result<u64, String>,
 ) -> Result<Vec<&'static str>, String> {
@@ -73,11 +78,7 @@ fn shuffled_ids(
 }
 
 pub fn generate() -> Result<[&'static str; STORY_LENGTH], String> {
-    let mut rng = SysRng;
-    let mut next_u64 = || {
-        rng.try_next_u64()
-            .map_err(|e| format!("random story generation failed: {e}"))
-    };
+    let mut next_u64 = sys_rng_next_u64("random story generation failed");
     let ids = shuffled_ids(&mut next_u64)?;
     ids[..STORY_LENGTH]
         .try_into()
@@ -85,11 +86,7 @@ pub fn generate() -> Result<[&'static str; STORY_LENGTH], String> {
 }
 
 pub fn shuffled_catalog() -> Result<Vec<&'static str>, String> {
-    let mut rng = SysRng;
-    let mut next_u64 = || {
-        rng.try_next_u64()
-            .map_err(|e| format!("random display shuffle failed: {e}"))
-    };
+    let mut next_u64 = sys_rng_next_u64("random display shuffle failed");
     shuffled_ids(&mut next_u64)
 }
 
