@@ -714,15 +714,17 @@ impl CofferlyApp {
                 self.unlocking = true;
                 self.set_status_info("Unlocking…");
                 std::thread::spawn(move || {
-                    let outcome = match crypto::decrypt(&raw, &pin) {
-                        Ok((plain, session)) => match serde_json::from_slice::<AppData>(&plain) {
-                            Ok(loaded) => match data::normalize_app_data(loaded) {
-                                Some(normalized) => Ok((normalized, session)),
-                                None => Err("Saved data is invalid after decryption.".to_string()),
-                            },
-                            Err(err) => Err(format!("Could not parse decrypted data: {err}")),
-                        },
-                        Err(_) => Err("Wrong PIN or data has been tampered with.".to_string()),
+                    let outcome = match io::decrypt_app_data(&raw, &pin) {
+                        Ok((normalized, session)) => Ok((normalized, session)),
+                        Err(io::DecryptAppDataError::Decrypt(_)) => {
+                            Err("Wrong PIN or data has been tampered with.".to_string())
+                        }
+                        Err(io::DecryptAppDataError::Parse(err)) => {
+                            Err(format!("Could not parse decrypted data: {err}"))
+                        }
+                        Err(io::DecryptAppDataError::Invalid) => {
+                            Err("Saved data is invalid after decryption.".to_string())
+                        }
                     };
                     let _ = tx.send(BackgroundCryptoResult::Unlock(outcome));
                 });
@@ -748,19 +750,9 @@ impl CofferlyApp {
                 return;
             }
 
-            match crypto::decrypt(raw, &entered) {
-                Ok((plain, session)) => {
-                    if let Ok(loaded) = serde_json::from_slice::<AppData>(&plain) {
-                        if let Some(normalized) = data::normalize_app_data(loaded) {
-                            self.apply_unlock(normalized, session);
-                            return;
-                        }
-                    }
-                    self.clear_pin_digits();
-                    self.session = None;
-                    self.register_unlock_failure(
-                        "Wrong credential or data has been tampered with.",
-                    );
+            match io::decrypt_app_data(raw, &entered) {
+                Ok((normalized, session)) => {
+                    self.apply_unlock(normalized, session);
                     return;
                 }
                 Err(_) => {
@@ -1371,18 +1363,14 @@ impl CofferlyApp {
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.unlock_rx = Some(rx);
                 std::thread::spawn(move || {
-                    let outcome = match crypto::decrypt(&raw, &secret) {
-                        Ok((plain, session)) => match serde_json::from_slice::<AppData>(&plain) {
-                            Ok(data) => data::normalize_app_data(data)
-                                .map(|data| (data, session))
-                                .ok_or_else(|| {
-                                    "Saved data is invalid after decryption.".to_owned()
-                                }),
-                            Err(_) => Err("Saved data is invalid after decryption.".to_owned()),
-                        },
-                        Err(_) => {
+                    let outcome = match io::decrypt_app_data(&raw, &secret) {
+                        Ok((data, session)) => Ok((data, session)),
+                        Err(io::DecryptAppDataError::Decrypt(_)) => {
                             Err("Wrong Coffer Story or data has been tampered with.".to_owned())
                         }
+                        Err(
+                            io::DecryptAppDataError::Parse(_) | io::DecryptAppDataError::Invalid,
+                        ) => Err("Saved data is invalid after decryption.".to_owned()),
                     };
                     let _ = tx.send(BackgroundCryptoResult::Unlock(outcome));
                 });
