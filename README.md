@@ -171,7 +171,7 @@ cargo run
 
 ## Release Checklist
 
-See [docs/RELEASE.md](docs/RELEASE.md).
+See [docs/RELEASE.md](https://github.com/danielendara/cofferly/blob/main/docs/RELEASE.md).
 
 ## Project Goals
 
@@ -184,9 +184,9 @@ See [docs/RELEASE.md](docs/RELEASE.md).
 
 This is a maintainer-led family app. Contributions are welcome when they fit the project goals, but all changes must go through issues or pull requests and maintainer review.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+See [CONTRIBUTING.md](https://github.com/danielendara/cofferly/blob/main/CONTRIBUTING.md) before opening a pull request.
 
-Repository protection recommendations are documented in [docs/GITHUB_SETTINGS.md](docs/GITHUB_SETTINGS.md).
+Repository protection recommendations are documented in [docs/GITHUB_SETTINGS.md](https://github.com/danielendara/cofferly/blob/main/docs/GITHUB_SETTINGS.md).
 
 ## Third-party assets
 

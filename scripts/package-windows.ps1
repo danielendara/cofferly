@@ -30,7 +30,14 @@ try {
     Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "CHANGELOG.md") -Destination $packageDir
     Copy-Item -LiteralPath (Join-Path $root "SECURITY.md") -Destination $packageDir
-    Copy-Item -LiteralPath (Join-Path $root "docs") -Destination $packageDir -Recurse
+
+    $shippedDocs = Join-Path $packageDir "docs"
+    New-Item -ItemType Directory -Force -Path $shippedDocs | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root "docs\recovery-card.md") -Destination $shippedDocs
+
+    $shippedStoryLicense = Join-Path $packageDir "assets\story-icons"
+    New-Item -ItemType Directory -Force -Path $shippedStoryLicense | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root "assets\story-icons\LICENSE.txt") -Destination $shippedStoryLicense
 
     @"
 Cofferly $PackageVersion
