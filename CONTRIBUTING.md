@@ -26,7 +26,7 @@ Do not commit `vault.cofferly`, `data.json`, or `.env` files. CI runs `scripts/c
 
 If `cargo` is not on PATH on Windows, add `%USERPROFILE%\.cargo\bin` to PATH or run Cargo from that folder.
 
-CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `cargo fmt`, `cargo clippy`, and `scripts/check-vault-paths.sh`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**).
+CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `cargo fmt`, `cargo clippy`, and `scripts/check-vault-paths.sh`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**). The **Coverage** job is informational and is not merge-blocking.
 
 ## Pull Request Checklist
 

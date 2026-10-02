@@ -28,6 +28,7 @@ Cofferly is **public**. You remain the only admin. Production releases stay on G
     - `Test (windows-latest)`
     - `Test (macos-latest)`
     - `Security audit`
+  - The **Coverage** job enforces a 74% line floor in CI for signal only; it is not a required check and does not block merges.
   - Allowed merge method: squash only
   - No force-push, no deleting `main`
   - Bypass actor: you (emergency only)
