@@ -145,15 +145,45 @@ pub fn read_backup(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// Why `decrypt_app_data` failed, so each unlock call site can keep its exact
+/// user-facing strings while sharing one decrypt -> parse -> normalize chain.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecryptAppDataError {
+    /// Key unwrap or payload decryption failed (wrong secret or tampered data).
+    Decrypt(String),
+    /// Decrypted bytes are not valid JSON; carries the parser message.
+    Parse(String),
+    /// Valid JSON that does not normalize into usable app data.
+    Invalid,
+}
+
+/// Shared decrypt -> JSON parse -> `normalize_app_data` chain used by every
+/// unlock path. The plaintext stays inside this helper (zeroized on drop by
+/// `crypto::decrypt`); only the normalized `AppData` and the `SessionCrypto`
+/// leave it, so callers keep the same zeroization as inlining the chain.
+pub fn decrypt_app_data(
+    bytes: &[u8],
+    secret: &str,
+) -> Result<(AppData, SessionCrypto), DecryptAppDataError> {
+    let (plain, session) =
+        crate::crypto::decrypt(bytes, secret).map_err(DecryptAppDataError::Decrypt)?;
+    let loaded = serde_json::from_slice::<AppData>(&plain)
+        .map_err(|err| DecryptAppDataError::Parse(err.to_string()))?;
+    crate::data::normalize_app_data(loaded)
+        .ok_or(DecryptAppDataError::Invalid)
+        .map(|data| (data, session))
+}
+
 /// Decrypt a backup with the Coffer Story entered for it.
 pub fn open_backup(bytes: &[u8], secret: &str) -> Result<(AppData, SessionCrypto), String> {
-    let (plain, session) = crate::crypto::decrypt(bytes, secret)
-        .map_err(|_| "Wrong Coffer Story for this backup, or the file is damaged.".to_owned())?;
-    let data = serde_json::from_slice::<AppData>(&plain)
-        .ok()
-        .and_then(crate::data::normalize_app_data)
-        .ok_or_else(|| "The backup is invalid after decryption.".to_owned())?;
-    Ok((data, session))
+    decrypt_app_data(bytes, secret).map_err(|err| match err {
+        DecryptAppDataError::Decrypt(_) => {
+            "Wrong Coffer Story for this backup, or the file is damaged.".to_owned()
+        }
+        DecryptAppDataError::Parse(_) | DecryptAppDataError::Invalid => {
+            "The backup is invalid after decryption.".to_owned()
+        }
+    })
 }
 
 /// Replace the vault at `current_path` with `backup_bytes`.
@@ -656,5 +686,47 @@ mod tests {
             loaded.wallets[0].child_name,
             default_app_data().wallets[0].child_name
         );
+    }
+
+    #[test]
+    fn decrypt_app_data_roundtrips_with_the_right_secret() {
+        let vault = story_fixture("right-story", "Child A");
+
+        let (data, session) = decrypt_app_data(&vault, "right-story").unwrap();
+
+        assert_eq!(data.wallets[0].child_name, "Child A");
+        assert_eq!(session.version(), crate::crypto::STORY_VERSION);
+    }
+
+    #[test]
+    fn decrypt_app_data_reports_a_wrong_secret_as_decrypt() {
+        let vault = story_fixture("right-story", "Child A");
+
+        let error = decrypt_app_data(&vault, "wrong-story").unwrap_err();
+
+        assert!(matches!(error, DecryptAppDataError::Decrypt(_)));
+    }
+
+    #[test]
+    fn decrypt_app_data_reports_garbage_plaintext_as_parse() {
+        let mut session = None;
+        let encrypted = crate::crypto::encrypt(b"not json", "1234", &mut session).unwrap();
+
+        let error = decrypt_app_data(&encrypted, "1234").unwrap_err();
+
+        assert!(matches!(error, DecryptAppDataError::Parse(_)));
+    }
+
+    #[test]
+    fn decrypt_app_data_reports_unnormalizable_data_as_invalid() {
+        let mut data = default_app_data();
+        data.wallets.clear();
+        let serialized = serde_json::to_vec(&data).unwrap();
+        let mut session = None;
+        let encrypted = crate::crypto::encrypt(&serialized, "1234", &mut session).unwrap();
+
+        let error = decrypt_app_data(&encrypted, "1234").unwrap_err();
+
+        assert_eq!(error, DecryptAppDataError::Invalid);
     }
 }
