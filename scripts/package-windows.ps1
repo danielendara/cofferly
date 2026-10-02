@@ -1,9 +1,15 @@
 param(
-    [string]$Version = "0.3.0"
+    [string]$Version = "",
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $cargoToml = Join-Path $PSScriptRoot "..\Cargo.toml"
+    $Version = (Select-String -Path $cargoToml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+}
+if ([string]::IsNullOrWhiteSpace($Version)) { throw "Could not resolve version from Cargo.toml" }
 $PackageVersion = $Version -replace '^v', ''
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $dist = Join-Path $root "dist"
@@ -18,7 +24,9 @@ if (-not (Test-Path $cargo)) {
 
 Push-Location $root
 try {
-    & $cargo build --release
+    if (-not $SkipBuild) {
+        & $cargo build --release
+    }
 
     if (Test-Path $packageDir) {
         Remove-Item -LiteralPath $packageDir -Recurse -Force
