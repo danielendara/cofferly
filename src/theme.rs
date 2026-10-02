@@ -60,14 +60,6 @@ pub fn wallet_card_chrome(selected: bool, focused: bool) -> WalletCardChrome {
 }
 
 pub fn balance_color(cents: i64) -> Color32 {
-    cents_color(cents)
-}
-
-pub fn amount_color(cents: i64) -> Color32 {
-    cents_color(cents)
-}
-
-fn cents_color(cents: i64) -> Color32 {
     if cents < 0 {
         NEGATIVE
     } else if cents > 0 {
@@ -179,9 +171,8 @@ mod tests {
 
     #[test]
     fn money_colors_distinguish_positive_negative_and_zero() {
-        assert_eq!(amount_color(1), POSITIVE);
-        assert_eq!(amount_color(-1), NEGATIVE);
-        assert_eq!(amount_color(0), TEXT_PRIMARY);
+        assert_eq!(balance_color(1), POSITIVE);
+        assert_eq!(balance_color(-1), NEGATIVE);
         assert_eq!(balance_color(0), TEXT_PRIMARY);
     }
 

@@ -202,15 +202,11 @@ struct UiState {
     /// is `Deduction`, matching today's hardcoded `EntryDraft::new()` value.
     #[serde(default)]
     last_entry_kind: EntryKind,
-    /// Last ledger description filter, restored on unlock/relaunch. Display-only:
-    /// it narrows which rows render but never touches entries or cache.
-    /// This is the selected kid's query; other children live in `ledger_filters`.
-    /// `#[serde(default)]` so state persisted by older builds still deserializes.
+    /// Selected child's ledger filter; per-child map in `ledger_filters`. See
+    /// `CofferlyApp::ledger_filter` / `ledger_filters`. `#[serde(default)]`.
     #[serde(default)]
     ledger_filter: String,
-    /// Per-child ledger description filters, keyed by `child_name`. Display-only
-    /// UI chrome — never written to the vault. `#[serde(default)]` so older RON
-    /// without this field still loads with empty per-child filters.
+    /// Per-child ledger filters keyed by `child_name`. `#[serde(default)]`.
     #[serde(default)]
     ledger_filters: HashMap<String, String>,
     /// Date (YYYY-MM-DD) of the last verified vault backup, shown in Settings.
@@ -262,13 +258,11 @@ pub(crate) struct CofferlyApp {
     /// `Arc` so handing a copy to the table each frame is a pointer bump, not a
     /// re-allocation of every row's description.
     ledger_cache: Option<(usize, LedgerSort, Arc<[OwnedLedgerRow]>)>,
-    /// Local description search over the ledger table, persisted via `UiState`.
-    /// Display-only: it narrows which rows `ledger_table` renders but never
-    /// touches `Wallet::entries`, the cached sort order, or `ledger_cache`.
-    /// This is the selected kid's query; other children live in `ledger_filters`.
+    /// Local ledger description filter (display-only): narrows `ledger_table`
+    /// rows without mutating `Wallet::entries`, sort order, or `ledger_cache`.
+    /// Persisted via `UiState`; selected child's string, others in `ledger_filters`.
     ledger_filter: String,
-    /// Per-child ledger description filters, keyed by `child_name`. Written back
-    /// to eframe storage only in `App::save`.
+    /// Per-child ledger filters keyed by `child_name` (same display-only rules).
     ledger_filters: HashMap<String, String>,
     /// Set by the `/` shortcut, consumed (and cleared) the next time
     /// `ledger_table` renders the filter field.

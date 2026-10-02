@@ -249,71 +249,57 @@ fn persist_demo(app: &mut CofferlyApp, data: &AppData) -> SessionCrypto {
     session_slot.expect("session established during encrypt")
 }
 
-fn prepare_story_setup(app: &mut CofferlyApp) {
-    let data = demo_app_data();
-    let _session = persist_demo(app, &data);
-
+fn reset_capture_demo_shell(app: &mut CofferlyApp, data: AppData) {
     app.data = data;
-    app.session = None;
     app.parent_unlocked = false;
     app.save_enabled = true;
-    app.lock_mode = LockMode::SetupReveal;
-    app.pending_story = Some(DEMO_STORY);
     app.story_selections.clear();
     app.display_order = stable_display_order();
     app.show_settings = false;
-    app.status =
-        Status::info("Write or print this recovery key and store it away from the computer.");
     app.selected_wallet = 1;
     app.child_name_input = "Child 2".to_owned();
     app.starting_balance_input = format_money_input(1_500);
     app.draft.kind = EntryKind::Deduction;
     app.draft.description.clear();
     app.draft.amount.clear();
+}
+
+fn prepare_story_setup(app: &mut CofferlyApp) {
+    let data = demo_app_data();
+    let _session = persist_demo(app, &data);
+
+    reset_capture_demo_shell(app, data);
+    app.session = None;
+    app.lock_mode = LockMode::SetupReveal;
+    app.pending_story = Some(DEMO_STORY);
+    app.status =
+        Status::info("Write or print this recovery key and store it away from the computer.");
 }
 
 fn prepare_story_unlock(app: &mut CofferlyApp) {
     let data = demo_app_data();
     let _session = persist_demo(app, &data);
 
-    app.data = data;
+    reset_capture_demo_shell(app, data);
     app.session = None;
-    app.parent_unlocked = false;
-    app.save_enabled = true;
     app.lock_mode = LockMode::Story;
     app.pending_story = None;
-    app.story_selections.clear();
-    app.display_order = stable_display_order();
-    app.show_settings = false;
     app.status = Status::info("Choose your Coffer Story to unlock Cofferly.");
-    app.selected_wallet = 1;
-    app.child_name_input = "Child 2".to_owned();
-    app.starting_balance_input = format_money_input(1_500);
-    app.draft.kind = EntryKind::Deduction;
-    app.draft.description.clear();
-    app.draft.amount.clear();
 }
 
 fn prepare_wallet(app: &mut CofferlyApp, show_settings: bool) {
     let data = demo_app_data();
     let session = persist_demo(app, &data);
 
-    app.data = data;
+    reset_capture_demo_shell(app, data);
     app.session = Some(session);
     app.parent_unlocked = true;
-    app.save_enabled = true;
     app.lock_mode = LockMode::Story;
     app.pending_story = None;
-    app.story_selections.clear();
     app.show_settings = show_settings;
     app.confirm_delete_wallet = false;
     app.status = Status::info("Parent mode unlocked.");
-    app.selected_wallet = 1;
-    app.child_name_input = "Child 2".to_owned();
     app.starting_balance_input = format_money_input(app.data.wallets[1].starting_balance_cents);
-    app.draft.kind = EntryKind::Deduction;
-    app.draft.description.clear();
-    app.draft.amount.clear();
     app.new_child_name_input.clear();
 }
 

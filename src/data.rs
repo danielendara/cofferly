@@ -38,21 +38,10 @@ pub struct Wallet {
     pub savings_goal_cents: Option<i64>,
 }
 
-/// A wallet's weekly allowance. Dates are calendar dates (`NaiveDate` from the
-/// local clock), so DST shifts can't move a posting day.
-///
-/// Rules (#179):
-/// - The weekday is the day it was turned on (`enabled_on`). That day itself
-///   does **not** post: the parent turning it on has usually just handled this
-///   week, so the first automatic entry is one week later.
-/// - `last_posted` is the latest weekday already accounted for: `enabled_on`
-///   until the first post, then the date of the newest posted entry. It only
-///   moves forward and is saved in the same vault write as the entries it
-///   covers, so re-unlocking, relaunching, or restoring a backup never posts a
-///   week twice.
-/// - Changing the amount keeps `enabled_on` and `last_posted`; only future weeks
-///   use the new amount. Turning it off drops the whole setting; turning it
-///   back on starts fresh from that day (the weeks it was off never post).
+/// Weekly allowance (#179). `enabled_on` is the posting weekday; that calendar
+/// day itself does not post. `last_posted` only moves forward (monotonic) and
+/// is saved with the entries it covers so unlock/relaunch/restore never double-posts.
+/// Catch-up is capped at [`MAX_ALLOWANCE_CATCH_UP_WEEKS`]; older missed weeks are skipped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeeklyAllowance {
     pub amount_cents: i64,
@@ -186,15 +175,15 @@ pub fn parse_ledger_date(input: &str) -> Result<NaiveDate, String> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct LedgerRow<'a> {
-    pub date: LedgerRowDate,
-    pub description: &'a str,
-    pub amount_cents: i64,
-    pub balance_cents: i64,
+struct LedgerRow<'a> {
+    date: LedgerRowDate,
+    description: &'a str,
+    amount_cents: i64,
+    balance_cents: i64,
     /// Index into `Wallet::entries`, or `None` for the synthetic starting-balance
     /// row. Rows are sorted and filtered for display, so this is what lets the UI
     /// point back at the entry a row came from (e.g. to correct it).
-    pub entry_index: Option<usize>,
+    entry_index: Option<usize>,
 }
 
 /// Owned ledger row for UI caching (avoids rebuilding borrows every frame).
@@ -209,7 +198,7 @@ pub struct OwnedLedgerRow {
 }
 
 impl OwnedLedgerRow {
-    pub fn from_borrowed(row: LedgerRow<'_>) -> Self {
+    fn from_borrowed(row: LedgerRow<'_>) -> Self {
         Self {
             date: row.date,
             description: row.description.to_owned(),
@@ -238,7 +227,7 @@ impl Wallet {
             })
     }
 
-    pub fn ledger_rows(&self) -> Vec<LedgerRow<'_>> {
+    fn ledger_rows(&self) -> Vec<LedgerRow<'_>> {
         let mut balance = self.starting_balance_cents;
         let mut rows = Vec::with_capacity(self.entries.len() + 1);
 
@@ -310,7 +299,7 @@ impl Wallet {
         Some(balances)
     }
 
-    pub fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
+    fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
         let mut rows: Vec<_> = self.ledger_rows().into_iter().enumerate().collect();
 
         rows.sort_by(|(left_index, left_row), (right_index, right_row)| {
@@ -408,18 +397,9 @@ pub struct LedgerFilterSummary<'a> {
     pub matching_net_cents: i64,
 }
 
-/// Narrows already-sorted ledger rows for the table's local description filter
-/// (issue #139) in one pass. Purely display-level: never touches
-/// `Wallet::entries`, preserves input order, and only omits non-matching
-/// entries.
-///
-/// Case-insensitive substring match on `description`. An empty or
-/// whitespace-only query keeps every row. The starting-balance row is always
-/// kept (even when nothing else matches) so a filtered table is never
-/// confused with having no ledger at all.
-///
-/// `matching_entry_count` and `matching_net_cents` count only real entries,
-/// not the start row.
+/// One-pass description filter for already-sorted rows. Trims the query;
+/// whitespace-only keeps every row. The start row is always kept so an empty
+/// match set is not confused with an empty ledger. Counts exclude the start row.
 pub fn ledger_filter_summary<'a>(
     rows: &'a [OwnedLedgerRow],
     query: &str,
