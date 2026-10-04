@@ -18,7 +18,7 @@ dirs = "7"
 eframe = { version = "0.36", features = ["persistence"] }
 egui_extras = "0.36"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-opener = "0.8"
+opener = "0.9"
 rand = "0.10"
 rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
