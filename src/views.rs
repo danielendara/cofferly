@@ -339,7 +339,7 @@ impl CofferlyApp {
                                         ui.label(
                                             egui::RichText::new(format!("{}", index + 1))
                                                 .strong()
-                                                .color(theme::GOLD_DARK),
+                                                .color(theme::GOLD_TEXT),
                                         );
                                         ui.label(
                                             egui::RichText::new(crate::story::label(id).unwrap_or(id))
@@ -533,20 +533,27 @@ impl CofferlyApp {
                                     egui::Sense::click(),
                                 );
                                 let label = crate::story::label(id).unwrap_or(id);
-                                let (fill, stroke, text_color) = if !enabled {
-                                    (theme::FAINT_BG, theme::BORDER, theme::TEXT_SECONDARY)
-                                } else if response.hovered() {
-                                    (theme::ACCENT_LIGHT, theme::ACCENT, theme::ACCENT_DARK)
-                                } else {
-                                    (theme::CARD_BG, theme::BORDER, theme::TEXT_PRIMARY)
-                                };
+                                let (fill, stroke, text_color, focus_ring) =
+                                    theme::story_tile_chrome(
+                                        enabled,
+                                        response.hovered(),
+                                        response.has_focus(),
+                                    );
                                 ui.painter().rect(
                                     rect,
                                     egui::CornerRadius::same(8),
                                     fill,
-                                    egui::Stroke::new(1.0, stroke),
+                                    stroke,
                                     egui::StrokeKind::Inside,
                                 );
+                                if let Some(ring) = focus_ring {
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        egui::CornerRadius::same(8),
+                                        ring,
+                                        egui::StrokeKind::Inside,
+                                    );
+                                }
                                 if let Some(texture) = self.story_icon_textures.get(id) {
                                     draw_story_icon(ui, texture, response.rect);
                                 }
