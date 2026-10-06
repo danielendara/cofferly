@@ -806,6 +806,33 @@ fn backup_asks_before_replacing_an_existing_file() {
 }
 
 #[test]
+fn locking_clears_a_pending_backup_overwrite_prompt() {
+    let (mut app, dir, _current) = unlocked_story_app();
+    let dest = dir.path().join("existing.cofferly");
+    std::fs::write(&dest, b"older backup").unwrap();
+
+    app.back_up_vault_to(dest.clone(), false);
+    assert!(app.pending_backup_overwrite.is_some());
+
+    app.lock_parent();
+    assert!(app.pending_backup_overwrite.is_none());
+    assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
+}
+
+#[test]
+fn opening_settings_clears_a_pending_backup_overwrite_prompt() {
+    let (mut app, dir, _current) = unlocked_story_app();
+    let dest = dir.path().join("existing.cofferly");
+    std::fs::write(&dest, b"older backup").unwrap();
+
+    app.back_up_vault_to(dest, false);
+    assert!(app.pending_backup_overwrite.is_some());
+
+    app.open_settings();
+    assert!(app.pending_backup_overwrite.is_none());
+}
+
+#[test]
 fn backup_requires_parent_mode_and_a_saved_vault() {
     let (mut app, dir) = test_app();
     let dest = dir.path().join("backup.cofferly");
