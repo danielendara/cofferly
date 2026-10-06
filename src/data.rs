@@ -239,18 +239,65 @@ impl Wallet {
             entry_index: None,
         });
 
+        // Balances accrue in date order; rows stay in insertion order.
+        let mut balances = vec![0; self.entries.len()];
+        for index in self.chronological_entry_indices() {
+            balance = clamp_cents(balance.saturating_add(self.entries[index].amount_cents));
+            balances[index] = balance;
+        }
+
         for (index, entry) in self.entries.iter().enumerate() {
-            balance = clamp_cents(balance.saturating_add(entry.amount_cents));
             rows.push(LedgerRow {
                 date: LedgerRowDate::Entry(entry.date),
                 description: &entry.description,
                 amount_cents: entry.amount_cents,
-                balance_cents: balance,
+                balance_cents: balances[index],
                 entry_index: Some(index),
             });
         }
 
         rows
+    }
+
+    /// Entry indices oldest-first, ties broken by insertion order.
+    fn chronological_entry_indices(&self) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..self.entries.len()).collect();
+        indices.sort_by_key(|&index| (self.entries[index].date, index));
+        indices
+    }
+
+    /// Would replacing entry `entry_index` with `date`/`signed_amount` leave the
+    /// balance below zero at that entry's place in date order, or anywhere after?
+    pub fn goes_negative_with(
+        &self,
+        entry_index: usize,
+        date: NaiveDate,
+        signed_amount: i64,
+    ) -> bool {
+        let mut candidates: Vec<(NaiveDate, usize, i64)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                if index == entry_index {
+                    (date, index, signed_amount)
+                } else {
+                    (entry.date, index, entry.amount_cents)
+                }
+            })
+            .collect();
+        candidates.sort_by_key(|&(date, index, _)| (date, index));
+
+        let mut balance = self.starting_balance_cents;
+        let mut reached = false;
+        for (_, index, amount) in candidates {
+            balance = balance.saturating_add(amount);
+            reached |= index == entry_index;
+            if reached && balance < 0 {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn balances_are_valid(&self) -> bool {
@@ -487,6 +534,13 @@ pub fn valid_child_name(name: &str) -> bool {
     !name.trim().is_empty() && name.chars().count() <= MAX_CHILD_NAME_CHARS
 }
 
+pub fn child_name_taken(wallets: &[Wallet], name: &str, except: Option<usize>) -> bool {
+    let name = name.trim().to_lowercase();
+    wallets.iter().enumerate().any(|(index, wallet)| {
+        Some(index) != except && wallet.child_name.trim().to_lowercase() == name
+    })
+}
+
 pub fn valid_cents(cents: i64) -> bool {
     cents.unsigned_abs() <= MAX_ABSOLUTE_CENTS as u64
 }
@@ -528,6 +582,22 @@ mod tests {
         assert!(!valid_child_name(
             "This name is too long for the Cofferly sidebar"
         ));
+    }
+
+    #[test]
+    fn child_name_taken_ignores_case_whitespace_and_except_index() {
+        let wallet = |name: &str| Wallet {
+            child_name: name.to_owned(),
+            starting_balance_cents: 0,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        };
+        let wallets = vec![wallet("Sam"), wallet("Alex")];
+        assert!(child_name_taken(&wallets, " sam ", None));
+        assert!(child_name_taken(&wallets, "sam", Some(1)));
+        assert!(!child_name_taken(&wallets, "sam", Some(0)));
+        assert!(!child_name_taken(&wallets, "Robin", None));
     }
 
     #[test]
@@ -674,6 +744,63 @@ mod tests {
             ["Latest", "Second", "First", "Starting balance"]
         );
         assert_eq!(balances, [1400, 1300, 1500, 1000]);
+    }
+
+    fn backdated_wallet() -> Wallet {
+        Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 10).unwrap(),
+                    description: "Later".to_owned(),
+                    amount_cents: 1000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                    description: "Backdated".to_owned(),
+                    amount_cents: -500,
+                },
+            ],
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        }
+    }
+
+    #[test]
+    fn running_balances_follow_date_order_for_backdated_entries() {
+        let wallet = backdated_wallet();
+
+        let oldest: Vec<_> = wallet
+            .ledger_rows_sorted(LedgerSort::OldestFirst)
+            .iter()
+            .map(|row| row.balance_cents)
+            .collect();
+        let newest: Vec<_> = wallet
+            .ledger_rows_sorted(LedgerSort::NewestFirst)
+            .iter()
+            .map(|row| row.balance_cents)
+            .collect();
+
+        assert_eq!(oldest, [0, -500, 500]);
+        assert_eq!(newest, [500, -500, 0]);
+        assert_eq!(wallet.current_balance_cents(), 500);
+    }
+
+    #[test]
+    fn goes_negative_with_uses_the_new_date_order() {
+        let wallet = backdated_wallet();
+        let jul = |day| NaiveDate::from_ymd_opt(2026, 7, day).unwrap();
+
+        // The backdated -5.00 sits first in date order, so it is negative there
+        // even though it is the later entry in the list.
+        assert!(wallet.goes_negative_with(1, jul(1), -500));
+        assert!(wallet.goes_negative_with(1, jul(1), -300));
+        // Moving it after the +10.00 income keeps every point non-negative.
+        assert!(!wallet.goes_negative_with(1, jul(11), -500));
+        // A money-out correction moved earlier takes an earlier point below zero.
+        assert!(wallet.goes_negative_with(0, jul(1), -100));
+        assert!(!wallet.goes_negative_with(0, jul(10), 1000));
     }
 
     #[test]

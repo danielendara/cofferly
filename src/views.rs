@@ -8,8 +8,8 @@
 use eframe::egui;
 
 use crate::data::{
-    description_length_accessible_name, description_length_label, format_ledger_date,
-    ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
+    child_name_taken, description_length_accessible_name, description_length_label,
+    format_ledger_date, ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -882,14 +882,20 @@ impl CofferlyApp {
                             |ui| {
                                 settings_field_label(ui, "Wallet name");
                                 let rename_ready = valid_child_name(self.child_name_input.trim())
-                                    && self.child_name_input.trim() != selected_name;
+                                    && self.child_name_input.trim() != selected_name
+                                    && !child_name_taken(
+                                        &self.data.wallets,
+                                        self.child_name_input.trim(),
+                                        Some(self.selected_wallet),
+                                    );
                                 settings_input_action_row(ui, 112.0, |ui, input_width| {
                                     ui.add_sized(
                                         [input_width, 38.0],
                                         egui::TextEdit::singleline(&mut self.child_name_input)
                                             .hint_text(&selected_name)
                                             .char_limit(40),
-                                    );
+                                    )
+                                    .widget_info(|| text_edit_info(WALLET_NAME_LABEL));
                                     if ui
                                         .add_enabled(
                                             rename_ready,
@@ -920,7 +926,8 @@ impl CofferlyApp {
                                             &mut self.starting_balance_input,
                                         )
                                         .hint_text(format_money_input(starting_balance)),
-                                    );
+                                    )
+                                    .widget_info(|| text_edit_info(STARTING_BALANCE_LABEL));
                                     if ui
                                         .add_enabled(
                                             balance_ready,
@@ -958,7 +965,8 @@ impl CofferlyApp {
                                             &mut self.weekly_allowance_input,
                                         )
                                         .hint_text("Off"),
-                                    );
+                                    )
+                                    .widget_info(|| text_edit_info(WEEKLY_ALLOWANCE_LABEL));
                                     if ui
                                         .add_enabled(
                                             allowance_ready,
@@ -992,7 +1000,8 @@ impl CofferlyApp {
                                         [input_width, 38.0],
                                         egui::TextEdit::singleline(&mut self.savings_goal_input)
                                             .hint_text("No goal"),
-                                    );
+                                    )
+                                    .widget_info(|| text_edit_info(SAVINGS_GOAL_LABEL));
                                     if ui
                                         .add_enabled(
                                             goal_ready,
@@ -1059,14 +1068,20 @@ impl CofferlyApp {
                             theme::TEXT_PRIMARY,
                             |ui| {
                                 settings_field_label(ui, "Child name");
-                                let add_ready = valid_child_name(self.new_child_name_input.trim());
+                                let add_ready = valid_child_name(self.new_child_name_input.trim())
+                                    && !child_name_taken(
+                                        &self.data.wallets,
+                                        self.new_child_name_input.trim(),
+                                        None,
+                                    );
                                 settings_input_action_row(ui, 112.0, |ui, input_width| {
                                     ui.add_sized(
                                         [input_width, 38.0],
                                         egui::TextEdit::singleline(&mut self.new_child_name_input)
                                             .hint_text("New child")
                                             .char_limit(40),
-                                    );
+                                    )
+                                    .widget_info(|| text_edit_info(CHILD_NAME_LABEL));
                                     if ui
                                         .add_enabled(
                                             add_ready,
@@ -1432,20 +1447,22 @@ impl CofferlyApp {
                     )
                 });
 
-                ui.label(
+                let amount_label = ui.label(
                     egui::RichText::new("Amount")
                         .size(11.0)
                         .strong()
                         .color(theme::TEXT_PRIMARY),
                 );
-                let amount_response = ui.add_sized(
-                    [ui.available_width(), 32.0],
-                    egui::TextEdit::singleline(&mut self.draft.amount)
-                        .id(crate::entry_field_id(EntryFormField::Amount))
-                        .hint_text("$0.00"),
-                );
+                let amount_response = ui
+                    .add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::TextEdit::singleline(&mut self.draft.amount)
+                            .id(crate::entry_field_id(EntryFormField::Amount))
+                            .hint_text("$0.00"),
+                    )
+                    .labelled_by(amount_label.id);
 
-                ui.label(
+                let date_label = ui.label(
                     egui::RichText::new("Date")
                         .size(11.0)
                         .strong()
@@ -1462,7 +1479,8 @@ impl CofferlyApp {
                             egui::TextEdit::singleline(&mut self.draft.date_input)
                                 .id(crate::entry_field_id(EntryFormField::Date))
                                 .hint_text("MM/DD/YYYY or YYYY-MM-DD"),
-                        );
+                        )
+                        .labelled_by(date_label.id);
                         if ui
                             .add_sized([today_width, 32.0], egui::Button::new("Today"))
                             .on_hover_text("Fill today's local date")
@@ -1583,6 +1601,7 @@ impl CofferlyApp {
                     .hint_text("Filter by description")
                     .desired_width(260.0),
             );
+            filter_response.widget_info(|| text_edit_info(LEDGER_FILTER_LABEL));
             // Esc while the filter is focused clears it AND blurs (rather than just
             // clearing) — leaving it focused-but-empty would make a second Esc a
             // no-op with no visible feedback, and blurring lets `/` cleanly refocus
@@ -1999,6 +2018,17 @@ fn settings_section<R>(
         .inner
 }
 
+const WALLET_NAME_LABEL: &str = "Wallet name";
+const STARTING_BALANCE_LABEL: &str = "Starting balance";
+const WEEKLY_ALLOWANCE_LABEL: &str = "Weekly allowance";
+const SAVINGS_GOAL_LABEL: &str = "Savings goal";
+const CHILD_NAME_LABEL: &str = "Child name";
+const LEDGER_FILTER_LABEL: &str = "Filter ledger by description";
+
+fn text_edit_info(name: &str) -> egui::WidgetInfo {
+    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name)
+}
+
 fn settings_field_label(ui: &mut egui::Ui, label: &str) {
     ui.label(
         egui::RichText::new(label)
@@ -2185,6 +2215,12 @@ mod ledger_amount_a11y_tests {
             "Starting balance $10.00"
         );
         assert!(!ledger_amount_accessible_name(-500, false).contains("-$"));
+    }
+
+    #[test]
+    fn ledger_filter_accessible_name_mentions_filter() {
+        assert!(!LEDGER_FILTER_LABEL.is_empty());
+        assert!(LEDGER_FILTER_LABEL.to_lowercase().contains("filter"));
     }
 }
 

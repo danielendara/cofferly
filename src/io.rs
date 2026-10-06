@@ -326,8 +326,15 @@ pub fn reserve_private_temp_path(stem: &str, ext: &str) -> Result<PathBuf, Strin
 
 /// Best-effort cleanup of previous print artifacts under the OS temp directory.
 pub fn cleanup_temp_print_artifacts() {
-    let temp = std::env::temp_dir();
-    let Ok(entries) = fs::read_dir(&temp) else {
+    cleanup_print_artifacts_in(&std::env::temp_dir());
+}
+
+fn is_print_artifact_name(name: &str) -> bool {
+    name.starts_with("cofferly-") && (name.ends_with(".html") || name.ends_with(".csv"))
+}
+
+fn cleanup_print_artifacts_in(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
 
@@ -336,7 +343,7 @@ pub fn cleanup_temp_print_artifacts() {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name.starts_with("cofferly-") && (name.ends_with(".html") || name.ends_with(".csv")) {
+        if is_print_artifact_name(name) {
             let _ = fs::remove_file(path);
         }
     }
@@ -369,6 +376,47 @@ mod tests {
             backup_file_name(date),
             "Cofferly-backup-2026-09-03.cofferly"
         );
+    }
+
+    #[test]
+    fn print_artifact_sweep_removes_only_matching_files() {
+        let dir = tempdir().unwrap();
+        let swept = [
+            "cofferly-a-ledger-XXXX.html",
+            "cofferly-ledgers-XXXX.csv",
+            "cofferly-recovery-card-XXXX.html",
+        ];
+        let kept = [
+            "Cofferly-backup-2026-09-03.cofferly",
+            "vault.cofferly",
+            "cofferly-notes.txt",
+            "other.html",
+        ];
+        for name in swept.iter().chain(kept.iter()) {
+            fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        fs::create_dir(dir.path().join("cofferly-dir.html")).unwrap();
+
+        cleanup_print_artifacts_in(dir.path());
+
+        for name in swept {
+            assert!(!dir.path().join(name).exists(), "{name} should be swept");
+        }
+        for name in kept {
+            assert!(dir.path().join(name).exists(), "{name} should be kept");
+        }
+        assert!(dir.path().join("cofferly-dir.html").is_dir());
+    }
+
+    #[test]
+    fn reserved_temp_paths_match_the_sweep_pattern() {
+        for ext in ["html", "csv"] {
+            let path = reserve_private_temp_path("stem", ext).unwrap();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap();
+            let matches = is_print_artifact_name(name);
+            fs::remove_file(&path).unwrap();
+            assert!(matches, "{name} should match the sweep pattern");
+        }
     }
 
     #[test]
