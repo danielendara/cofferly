@@ -36,12 +36,21 @@ pub fn write_printable_ledger_filtered(
         }
         body.push_str(&header);
 
+        let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        let summary = ledger_filter_summary(&owned_rows, description_filter);
+        if !description_filter.trim().is_empty() {
+            body.push_str(&format!(
+                "<p class=\"filter\" style=\"font-size: 14px; margin: -10px 0 18px;\">Showing {} of {} entries matching “{}”. Balances include every entry.</p>",
+                summary.matching_entry_count,
+                wallet.entries.len(),
+                escape_html(description_filter.trim())
+            ));
+        }
+
         body.push_str(
             "<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Balance</th></tr></thead><tbody>",
         );
 
-        let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-        let summary = ledger_filter_summary(&owned_rows, description_filter);
         for ledger_row in summary.rows {
             let row = format!(
                 "<tr><td>{}</td><td>{}</td><td class=\"{}\">{}</td><td>{}</td></tr>",
@@ -261,6 +270,45 @@ mod tests {
         assert!(all_html.contains("Weekly allowance"));
         assert!(all_html.contains("Child 2"));
         assert!(all_html.contains("Bus fare"));
+    }
+
+    #[test]
+    fn filtered_printable_ledger_says_it_is_filtered() {
+        let dir = tempdir().unwrap();
+        let wallets = sample_wallets();
+
+        let path = dir.path().join("ledger.html");
+        let html = std::fs::read_to_string(
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack").unwrap(),
+        )
+        .unwrap();
+        assert!(html.contains("Showing 2 of 3 entries matching"));
+        assert!(html.contains("Balances include every entry"));
+
+        let path = dir.path().join("escaped.html");
+        let html = std::fs::read_to_string(
+            write_printable_ledger_filtered(&path, &wallets[..1], "<b>snack").unwrap(),
+        )
+        .unwrap();
+        assert!(html.contains("matching “&lt;b&gt;snack”"));
+
+        let path = dir.path().join("blank.html");
+        let html = std::fs::read_to_string(
+            write_printable_ledger_filtered(&path, &wallets[..1], "  ").unwrap(),
+        )
+        .unwrap();
+        assert!(!html.contains("class=\"filter\""));
+    }
+
+    #[test]
+    fn unfiltered_printable_ledger_has_no_filter_note_or_rule() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.html");
+        let html =
+            std::fs::read_to_string(write_printable_ledger(&path, &sample_wallets()).unwrap())
+                .unwrap();
+        assert!(!html.contains("class=\"filter\""));
+        assert!(!html.contains(".filter"));
     }
 
     fn sample_wallets() -> Vec<Wallet> {
