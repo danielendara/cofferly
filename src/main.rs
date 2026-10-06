@@ -1628,21 +1628,14 @@ impl CofferlyApp {
     /// Would this candidate entry drive the running balance negative *at its own
     /// position* (or anywhere after it)? A final-balance check misses exactly the
     /// case this is for: a correction in the middle of the ledger.
-    fn edit_would_go_negative(&self, entry_index: usize, signed_amount: i64) -> bool {
-        let wallet = self.selected_wallet();
-        let mut balance = wallet.starting_balance_cents;
-        for (index, entry) in wallet.entries.iter().enumerate() {
-            let amount = if index == entry_index {
-                signed_amount
-            } else {
-                entry.amount_cents
-            };
-            balance = balance.saturating_add(amount);
-            if index >= entry_index && balance < 0 {
-                return true;
-            }
-        }
-        false
+    fn edit_would_go_negative(
+        &self,
+        entry_index: usize,
+        date: NaiveDate,
+        signed_amount: i64,
+    ) -> bool {
+        self.selected_wallet()
+            .goes_negative_with(entry_index, date, signed_amount)
     }
 
     /// Applies the correction. A failed vault write puts the previous entry back
@@ -1675,7 +1668,7 @@ impl CofferlyApp {
         };
 
         if input.signed_amount < 0
-            && self.edit_would_go_negative(session.entry_index, input.signed_amount)
+            && self.edit_would_go_negative(session.entry_index, input.date, input.signed_amount)
             && self.confirm_negative_cents != Some(input.amount)
         {
             self.confirm_negative_cents = Some(input.amount);

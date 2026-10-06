@@ -180,6 +180,36 @@ mod tests {
     }
 
     #[test]
+    fn printable_ledger_running_balances_follow_date_order_for_backdated_entries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.html");
+        let wallets = vec![Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 10).unwrap(),
+                    description: "Later".to_owned(),
+                    amount_cents: 1_000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                    description: "Backdated".to_owned(),
+                    amount_cents: -500,
+                },
+            ],
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        }];
+
+        let html =
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+
+        assert!(html.contains("Backdated</td><td class=\"minus\">-$5.00</td><td>-$5.00</td>"));
+        assert!(html.contains("<td>$5.00</td>"));
+    }
+
+    #[test]
     fn printable_ledger_includes_the_savings_goal_when_set() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.html");
