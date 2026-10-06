@@ -25,7 +25,8 @@ cargo build --release
 ./scripts/capture-screenshots.sh
 ```
 
-This runs Cofferly with `COFFERLY_CAPTURE` / `COFFERLY_DATA_DIR` (isolated vault) and overwrites:
+This runs Cofferly with `COFFERLY_CAPTURE` / `COFFERLY_DATA_DIR` (isolated vault).
+`COFFERLY_DATA_DIR` is required whenever `COFFERLY_CAPTURE` is set: capture overwrites the vault, so Cofferly exits with code 2 without it. The script sets it for you. It overwrites:
 
 - `docs/screenshots/cofferly-story-unlock.png`
 - `docs/screenshots/cofferly-wallet-screen.png`

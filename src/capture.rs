@@ -9,6 +9,9 @@
 //! `recovery-card` is an alias for `story-setup`. Run one target per process.
 //! ```
 //!
+//! `COFFERLY_DATA_DIR` is required: capture overwrites the vault at the data path,
+//! so the process exits with an error if `COFFERLY_CAPTURE` is set without it.
+//!
 //! Do not set these in normal family use.
 
 use std::collections::VecDeque;
@@ -65,12 +68,30 @@ pub struct CaptureSession {
     done: bool,
 }
 
+/// Capture overwrites the vault at `app.data_path`, so it needs an isolated data dir.
+fn capture_env_allowed(capture: Option<&str>, data_dir: Option<&str>) -> Result<(), String> {
+    let capture_on = capture.is_some_and(|c| !c.trim().is_empty());
+    let data_dir_set = data_dir.is_some_and(|d| !d.trim().is_empty());
+    if capture_on && !data_dir_set {
+        return Err(
+            "COFFERLY_CAPTURE requires COFFERLY_DATA_DIR so your real vault is not overwritten"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 impl CaptureSession {
     /// Returns `None` when capture mode is not requested.
     pub fn from_env() -> Option<Self> {
         let raw = std::env::var("COFFERLY_CAPTURE").ok()?;
         if raw.trim().is_empty() {
             return None;
+        }
+        let data_dir = std::env::var("COFFERLY_DATA_DIR").ok();
+        if let Err(msg) = capture_env_allowed(Some(&raw), data_dir.as_deref()) {
+            eprintln!("{msg}");
+            std::process::exit(2);
         }
         let mut queue = VecDeque::new();
         for part in raw.split(',') {
@@ -344,6 +365,15 @@ mod tests {
             Some(CaptureTarget::StoryUnlock)
         );
         assert!(CaptureTarget::parse("not-a-screen").is_none());
+    }
+
+    #[test]
+    fn capture_env_requires_a_data_dir_when_capture_is_on() {
+        assert!(capture_env_allowed(Some("wallet"), None).is_err());
+        assert!(capture_env_allowed(Some("wallet"), Some("  ")).is_err());
+        assert!(capture_env_allowed(Some("wallet"), Some("/tmp/x")).is_ok());
+        assert!(capture_env_allowed(None, None).is_ok());
+        assert!(capture_env_allowed(Some(""), None).is_ok());
     }
 
     #[test]
