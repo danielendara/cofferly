@@ -1002,6 +1002,7 @@ impl CofferlyApp {
         self.session = None;
         self.show_settings = false;
         self.confirm_delete_wallet = false;
+        self.pending_backup_overwrite = None;
         self.confirm_negative_cents = None;
         self.clear_pin_digits();
         self.cleanup_temp_artifacts();
@@ -1798,6 +1799,7 @@ impl CofferlyApp {
         self.prefill_settings_from_selected();
         self.new_child_name_input.clear();
         self.confirm_delete_wallet = false;
+        self.pending_backup_overwrite = None;
         self.show_settings = true;
     }
 
