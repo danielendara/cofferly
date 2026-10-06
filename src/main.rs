@@ -36,9 +36,9 @@ const UI_STATE_KEY: &str = "cofferly/ui_state";
 
 use crypto::SessionCrypto;
 use data::{
-    default_app_data, format_ledger_date, ledger_filter_summary, parse_ledger_date, valid_cents,
-    valid_child_name, valid_description, AppData, Entry, EntryKind, LedgerSort, OwnedLedgerRow,
-    Wallet, WeeklyAllowance,
+    child_name_taken, default_app_data, format_ledger_date, ledger_filter_summary,
+    parse_ledger_date, valid_cents, valid_child_name, valid_description, AppData, Entry, EntryKind,
+    LedgerSort, OwnedLedgerRow, Wallet, WeeklyAllowance,
 };
 use export_csv::{write_csv_ledger, write_csv_ledger_filtered};
 use io::{
@@ -2003,6 +2003,12 @@ impl CofferlyApp {
             self.set_status_err("Use a child name between 1 and 40 characters.");
             return;
         }
+        if child_name_taken(&self.data.wallets, &name, Some(self.selected_wallet)) {
+            self.set_status_err(format!(
+                "Another wallet is already named {name}. Choose a different name."
+            ));
+            return;
+        }
 
         self.remember_selected_ledger_filter();
         let previous_child_name = std::mem::take(&mut self.selected_wallet_mut().child_name);
@@ -2031,6 +2037,12 @@ impl CofferlyApp {
         let name = self.new_child_name_input.trim().to_owned();
         if !valid_child_name(&name) {
             self.set_status_err("Use a child name between 1 and 40 characters.");
+            return;
+        }
+        if child_name_taken(&self.data.wallets, &name, None) {
+            self.set_status_err(format!(
+                "Another wallet is already named {name}. Choose a different name."
+            ));
             return;
         }
 
