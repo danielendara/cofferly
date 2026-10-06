@@ -1,14 +1,24 @@
 pub fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
     let trimmed = input.trim();
-    let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed).trim();
-    if trimmed.is_empty() {
-        return Err("Enter a dollar amount.".to_owned());
+    // Accept the sign before or after the `$` (`-$5.00`, `$-5.00`), but only one sign.
+    fn split_sign(text: &str) -> (Option<bool>, &str) {
+        if let Some(rest) = text.strip_prefix('-') {
+            (Some(true), rest.trim_start())
+        } else if let Some(rest) = text.strip_prefix('+') {
+            (Some(false), rest.trim_start())
+        } else {
+            (None, text)
+        }
     }
-
-    let (negative, amount) = match trimmed.strip_prefix('-') {
-        Some(amount) => (true, amount),
-        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    fn strip_dollar(text: &str) -> &str {
+        text.strip_prefix('$').unwrap_or(text).trim_start()
+    }
+    let (sign, rest) = split_sign(trimmed);
+    let (sign, amount) = match sign {
+        Some(_) => (sign, strip_dollar(rest)),
+        None => split_sign(strip_dollar(rest)),
     };
+    let negative = sign == Some(true);
 
     if amount.is_empty() {
         return Err("Enter a dollar amount.".to_owned());
@@ -140,6 +150,21 @@ mod tests {
             parse_dollars_to_cents(&format_money(100_000_000)).unwrap(),
             100_000_000
         );
+    }
+
+    #[test]
+    fn parses_negative_displayed_money() {
+        assert_eq!(parse_dollars_to_cents("-$5.00").unwrap(), -500);
+        assert_eq!(parse_dollars_to_cents("-$1,234.56").unwrap(), -123_456);
+        assert_eq!(parse_dollars_to_cents("- $5").unwrap(), -500);
+        assert_eq!(parse_dollars_to_cents("$-5").unwrap(), -500);
+        assert_eq!(parse_dollars_to_cents("+$5").unwrap(), 500);
+        for cents in [-100_000_000, -123_456, -500, -1, 0, 1, 123_456] {
+            assert_eq!(parse_dollars_to_cents(&format_money(cents)), Ok(cents));
+        }
+        for input in ["--5", "-$-5", "$$5", "5$"] {
+            assert!(parse_dollars_to_cents(input).is_err(), "{input}");
+        }
     }
 
     #[test]
