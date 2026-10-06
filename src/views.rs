@@ -8,8 +8,8 @@
 use eframe::egui;
 
 use crate::data::{
-    description_length_accessible_name, description_length_label, format_ledger_date,
-    ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
+    child_name_taken, description_length_accessible_name, description_length_label,
+    format_ledger_date, ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
 };
 use crate::money::format_money;
 use crate::money::format_money_input;
@@ -875,7 +875,12 @@ impl CofferlyApp {
                             |ui| {
                                 settings_field_label(ui, "Wallet name");
                                 let rename_ready = valid_child_name(self.child_name_input.trim())
-                                    && self.child_name_input.trim() != selected_name;
+                                    && self.child_name_input.trim() != selected_name
+                                    && !child_name_taken(
+                                        &self.data.wallets,
+                                        self.child_name_input.trim(),
+                                        Some(self.selected_wallet),
+                                    );
                                 settings_input_action_row(ui, 112.0, |ui, input_width| {
                                     ui.add_sized(
                                         [input_width, 38.0],
@@ -1056,7 +1061,12 @@ impl CofferlyApp {
                             theme::TEXT_PRIMARY,
                             |ui| {
                                 settings_field_label(ui, "Child name");
-                                let add_ready = valid_child_name(self.new_child_name_input.trim());
+                                let add_ready = valid_child_name(self.new_child_name_input.trim())
+                                    && !child_name_taken(
+                                        &self.data.wallets,
+                                        self.new_child_name_input.trim(),
+                                        None,
+                                    );
                                 settings_input_action_row(ui, 112.0, |ui, input_width| {
                                     ui.add_sized(
                                         [input_width, 38.0],
