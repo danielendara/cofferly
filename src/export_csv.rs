@@ -114,6 +114,35 @@ mod tests {
     }
 
     #[test]
+    fn csv_running_balances_follow_date_order_for_backdated_entries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.csv");
+        let wallets = vec![Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 10).unwrap(),
+                    description: "Later".to_owned(),
+                    amount_cents: 1_000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                    description: "Backdated".to_owned(),
+                    amount_cents: -500,
+                },
+            ],
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        }];
+
+        let csv = std::fs::read_to_string(write_csv_ledger(&path, &wallets).unwrap()).unwrap();
+
+        assert!(csv.contains(",-5.00,-5.00\r\n"));
+        assert!(csv.contains(",10.00,5.00\r\n"));
+    }
+
+    #[test]
     fn csv_is_unchanged_when_a_wallet_has_a_savings_goal() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.csv");
