@@ -487,6 +487,13 @@ pub fn valid_child_name(name: &str) -> bool {
     !name.trim().is_empty() && name.chars().count() <= MAX_CHILD_NAME_CHARS
 }
 
+pub fn child_name_taken(wallets: &[Wallet], name: &str, except: Option<usize>) -> bool {
+    let name = name.trim().to_lowercase();
+    wallets.iter().enumerate().any(|(index, wallet)| {
+        Some(index) != except && wallet.child_name.trim().to_lowercase() == name
+    })
+}
+
 pub fn valid_cents(cents: i64) -> bool {
     cents.unsigned_abs() <= MAX_ABSOLUTE_CENTS as u64
 }
@@ -528,6 +535,22 @@ mod tests {
         assert!(!valid_child_name(
             "This name is too long for the Cofferly sidebar"
         ));
+    }
+
+    #[test]
+    fn child_name_taken_ignores_case_whitespace_and_except_index() {
+        let wallet = |name: &str| Wallet {
+            child_name: name.to_owned(),
+            starting_balance_cents: 0,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        };
+        let wallets = vec![wallet("Sam"), wallet("Alex")];
+        assert!(child_name_taken(&wallets, " sam ", None));
+        assert!(child_name_taken(&wallets, "sam", Some(1)));
+        assert!(!child_name_taken(&wallets, "sam", Some(0)));
+        assert!(!child_name_taken(&wallets, "Robin", None));
     }
 
     #[test]
