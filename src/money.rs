@@ -162,7 +162,7 @@ mod tests {
         for cents in [-100_000_000, -123_456, -500, -1, 0, 1, 123_456] {
             assert_eq!(parse_dollars_to_cents(&format_money(cents)), Ok(cents));
         }
-        for input in ["--5", "-$-5", "$$5", "5$"] {
+        for input in ["--5", "-$-5", "$$5", "5$", "$-$5", "$+$5"] {
             assert!(parse_dollars_to_cents(input).is_err(), "{input}");
         }
     }
