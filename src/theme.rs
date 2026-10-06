@@ -8,6 +8,9 @@ pub const ACCENT_DARK: Color32 = Color32::from_rgb(21, 92, 85);
 pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(228, 243, 239);
 pub const GOLD: Color32 = Color32::from_rgb(224, 157, 55);
 pub const GOLD_DARK: Color32 = Color32::from_rgb(176, 105, 18);
+/// Gold for normal-size text (AA 4.5:1 on CARD_BG and APP_BG); GOLD_DARK stays
+/// for strokes, dots and focus rings.
+pub const GOLD_TEXT: Color32 = Color32::from_rgb(150, 88, 10);
 pub const GOLD_LIGHT: Color32 = Color32::from_rgb(253, 241, 214);
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(34, 51, 59);
 pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(83, 101, 109);
@@ -57,6 +60,24 @@ pub fn wallet_card_chrome(selected: bool, focused: bool) -> WalletCardChrome {
         stroke,
         focus_ring,
     }
+}
+
+/// Story object tile colors. Disabled tiles never get the hover fill but still
+/// show the focus ring, since they remain Tab stops.
+pub fn story_tile_chrome(
+    enabled: bool,
+    hovered: bool,
+    focused: bool,
+) -> (Color32, Stroke, Color32, Option<Stroke>) {
+    let (fill, stroke, text) = if !enabled {
+        (FAINT_BG, BORDER, TEXT_SECONDARY)
+    } else if hovered {
+        (ACCENT_LIGHT, ACCENT, ACCENT_DARK)
+    } else {
+        (CARD_BG, BORDER, TEXT_PRIMARY)
+    };
+    let ring = focused.then(|| Stroke::new(3.0, GOLD_DARK));
+    (fill, Stroke::new(1.0, stroke), text, ring)
 }
 
 pub fn balance_color(cents: i64) -> Color32 {
@@ -221,6 +242,30 @@ mod tests {
         assert_ne!(focused_ring.color, both_ring.color);
         assert!(contrast_ratio(GOLD_DARK, CARD_BG) >= 3.0);
         assert!(contrast_ratio(Color32::WHITE, ACCENT) >= 3.0);
+    }
+
+    #[test]
+    fn story_tile_focus_ring_and_gold_text_contrast() {
+        let idle = story_tile_chrome(true, false, false);
+        let focused = story_tile_chrome(true, false, true);
+        assert!(idle.3.is_none());
+        let ring = focused.3.expect("focused tile has a ring");
+        assert_ne!(ring, idle.1);
+        assert_eq!((focused.0, focused.1), (idle.0, idle.1));
+        // Disabled tiles stay Tab stops: ring shows, no hover fill.
+        let disabled = story_tile_chrome(false, false, false);
+        assert_eq!(story_tile_chrome(false, true, false), disabled);
+        assert_eq!(disabled.0, FAINT_BG);
+        assert!(disabled.3.is_none());
+        let disabled_focused = story_tile_chrome(false, true, true);
+        assert_eq!(disabled_focused.3, Some(ring));
+        assert_eq!(
+            (disabled_focused.0, disabled_focused.1),
+            (disabled.0, disabled.1)
+        );
+        assert!(contrast_ratio(GOLD_DARK, ACCENT_LIGHT) >= 3.0);
+        assert!(contrast_ratio(GOLD_TEXT, CARD_BG) >= 4.5);
+        assert!(contrast_ratio(GOLD_TEXT, APP_BG) >= 4.5);
     }
 
     #[test]
