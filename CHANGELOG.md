@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-06
+
 ### Features
 
 - Optional per-wallet **weekly allowance** with weekday catch-up on parent unlock (at most eight missed weeks per unlock). Older vaults load unchanged (serde default).
 - Optional per-wallet **savings goal** with a progress bar on the wallet screen and a line on the printed ledger. Older vaults load unchanged (serde default). CSV export is unchanged.
+
+### Fixes
+
+- Accept pasted negative currency amounts such as `-$5.00`. (#202)
+- Refuse capture mode without an explicit `COFFERLY_DATA_DIR`, preventing accidental vault overwrite. (#205)
+- Compute running balances in transaction-date order so backdated entries show correct balances. (#206)
+- Clear stale backup-overwrite prompts when locking or opening Settings. (#207)
+- Reject duplicate wallet names. (#208)
 
 ### UX
 
@@ -14,6 +24,7 @@
 - Money-out that would leave a wallet below $0 asks for a second confirm (or Cancel) before it is recorded. Deposits are unchanged.
 - Entry form **Today** fills the local date. Date errors mention both MM/DD/YYYY and ISO `%Y-%m-%d`, and focus still moves to Date on failure.
 - Entry description shows a live `N/100` remaining count (and an AccessKit name) while submit still enforces the 100-character maximum.
+- Label filtered printouts so their reduced scope is clear. (#204)
 
 ### Docs
 
@@ -24,6 +35,12 @@
 - Ledger amounts keep their sign in the cell and expose Money in / Money out in the AccessKit name so polarity is not color-only.
 - Entry-form Money in/out uses a stronger selected fill and stroke, and AccessKit names include “selected”. Enter still submits the transaction.
 - Selected wallet cards use a thicker dark stroke; keyboard focus paints a 3px ring that stays visible on both white and teal fills, without changing 1280×800 card size.
+- Add accessible labels for Amount, Date, the ledger filter, and Settings inputs. (#209)
+- Give story tiles a visible focus ring and AA-contrast step numbers. (#210)
+
+### Tests
+
+- Cover the launch-time temporary-file sweep through an injectable directory. (#203)
 
 ## 0.3.0 — 2026-09-09
 

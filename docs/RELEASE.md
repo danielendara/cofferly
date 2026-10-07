@@ -48,7 +48,7 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the portab
 3. Compile with a version override if needed:
 
 ```powershell
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.3.0 installer\Cofferly.iss
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.4.0 installer\Cofferly.iss
 ```
 
 Output is written to `dist/` (`Cofferly-{version}-Setup.exe`).
@@ -58,7 +58,7 @@ Output is written to `dist/` (`Cofferly-{version}-Setup.exe`).
 1. `Cargo.toml` is the version source of truth. If the version changes, update `Cargo.toml`, `README.md`, the installer default version, and this checklist.
 2. Refresh the README screenshots in `docs/screenshots/` if the UI changed.
 3. Commit the release and merge to `main`.
-4. Tag it, for example `v0.3.0`, and push the tag.
+4. Tag it, for example `v0.4.0`, and push the tag.
 5. Confirm the Release workflow attached `Cofferly-*-windows-x64.zip` and `Cofferly-*-Setup.exe`.
 6. After tagging, refresh the current-state paragraph in `docs/RECOVERY.md`.
 
