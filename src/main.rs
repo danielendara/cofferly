@@ -1133,12 +1133,12 @@ impl CofferlyApp {
         self.clear_pin_digits();
         self.reset_story_entry();
         self.lock_mode = LockMode::LegacyPin;
-        self.set_status_info("Migration canceled. Enter the legacy PIN to unlock.");
+        self.set_status_info("Migration cancelled. Enter the legacy PIN to unlock.");
     }
 
     /// Returns from a confirm step to the matching reveal step so the parent
     /// can look at the story again. The pending story stays in memory by
-    /// design until a successful (or canceled) confirm.
+    /// design until a successful (or cancelled) confirm.
     pub(crate) fn back_to_story_reveal(&mut self) {
         self.lock_mode = match self.lock_mode {
             LockMode::SetupConfirm => LockMode::SetupReveal,

@@ -371,7 +371,7 @@ impl Wallet {
 
     /// Posts one "Weekly allowance" deposit per missed weekday after
     /// `last_posted`, up to and including `today` -- never a future date. At
-    /// most the newest `MAX_ALLOWANCE_CATCH_UP_WEEKS` are posted; older missed
+    /// most, the newest `MAX_ALLOWANCE_CATCH_UP_WEEKS` are posted; older missed
     /// weeks are skipped and counted. A clock set before `last_posted` posts
     /// nothing and leaves `last_posted` alone. Stops (without advancing past
     /// the last posted week) if an entry would overflow the balance range.
