@@ -1,4 +1,4 @@
-//! Rendering of the app's screens: the lock/PIN screen, the wallet header,
+//! Rendering of the app's screens: the lock / Coffer Story (and legacy PIN) flows, the wallet header,
 //! the entry form, the ledger table, and the settings window.
 //!
 //! These methods all belong to the same `impl CofferlyApp` block declared in
@@ -11,8 +11,7 @@ use crate::data::{
     child_name_taken, description_length_accessible_name, description_length_label,
     format_ledger_date, ledger_filter_summary, valid_child_name, LedgerRowDate, LedgerSort,
 };
-use crate::money::format_money;
-use crate::money::format_money_input;
+use crate::money::{format_money, format_money_input};
 use crate::theme;
 use crate::theme::balance_color;
 use crate::{CofferlyApp, EntryFormField, LockMode};
