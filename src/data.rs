@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
@@ -184,11 +184,16 @@ pub fn format_ledger_date(date: NaiveDate) -> String {
 
 pub fn parse_ledger_date(input: &str) -> Result<NaiveDate, String> {
     let trimmed = input.trim();
-    NaiveDate::parse_from_str(trimmed, "%m/%d/%Y")
+    let date = NaiveDate::parse_from_str(trimmed, "%m/%d/%Y")
         .or_else(|_| NaiveDate::parse_from_str(trimmed, "%Y-%m-%d"))
         .map_err(|_| {
             "Enter a date as MM/DD/YYYY (08/21/2026) or ISO %Y-%m-%d (2026-08-21).".to_owned()
-        })
+        })?;
+    // chrono's `%Y` accepts 1-4 digits, so "10/08/26" parses as year 0026.
+    if date.year() < 1900 {
+        return Err("Use a four-digit year, like 10/08/2026 or 2026-10-08.".to_owned());
+    }
+    Ok(date)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -638,6 +643,21 @@ mod tests {
         assert!(valid_cents(-MAX_ABSOLUTE_CENTS));
         assert!(!valid_cents(MAX_ABSOLUTE_CENTS + 1));
         assert!(!valid_cents(-(MAX_ABSOLUTE_CENTS + 1)));
+    }
+
+    #[test]
+    fn rejects_short_years_in_ledger_dates() {
+        let msg = "Use a four-digit year, like 10/08/2026 or 2026-10-08.";
+        for input in ["10/08/26", "10/08/202", "26-10-08"] {
+            assert_eq!(parse_ledger_date(input).unwrap_err(), msg, "{input}");
+        }
+        let oct8 = NaiveDate::from_ymd_opt(2026, 10, 8).unwrap();
+        assert_eq!(parse_ledger_date("10/08/2026"), Ok(oct8));
+        assert_eq!(parse_ledger_date("2026-10-08"), Ok(oct8));
+        assert_eq!(
+            parse_ledger_date("8/1/2026"),
+            Ok(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap())
+        );
     }
 
     #[test]
