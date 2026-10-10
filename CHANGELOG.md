@@ -6,6 +6,10 @@
 
 - Roll back a new entry and keep the typed form when the vault save fails, so the ledger never shows an entry that is not on disk. (#213)
 
+### Accessibility
+
+- Name the savings goal progress bar for screen readers (child, amount saved, goal, and amount to go). (#218)
+
 ### UX
 
 - Locking now ends an in-progress "Correct an entry" session and drops the pending Undo, so neither survives to the next unlock. (#214)
