@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Reject entry dates with a two- or three-digit year (e.g. `10/08/26`) instead of saving them as the year 0026. (#217)
 - Roll back a new entry and keep the typed form when the vault save fails, so the ledger never shows an entry that is not on disk. (#213)
 
 ### UX
