@@ -2178,6 +2178,33 @@ fn lock_clears_session_key() {
 }
 
 #[test]
+fn locking_cancels_an_in_progress_correction() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.description = "half typed".to_owned();
+    app.draft.amount = "3".to_owned();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(0);
+    app.draft.amount = "11.00".to_owned();
+    app.lock_parent();
+
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft.description, "half typed");
+    assert_eq!(app.draft.amount, "3");
+    assert_eq!(app.selected_wallet().entries, before);
+}
+
+#[test]
+fn locking_drops_a_pending_undo() {
+    let (mut app, _dir) = app_with_entries();
+    app.remove_latest_entry();
+    assert!(app.undo.is_some());
+
+    app.lock_parent();
+    assert!(app.undo.is_none());
+}
+
+#[test]
 fn lock_deletes_tracked_temp_artifacts() {
     let (mut app, dir) = test_app();
     let artifact = dir.path().join("cofferly-recovery-card-test.html");

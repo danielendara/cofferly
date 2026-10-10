@@ -1004,6 +1004,10 @@ impl CofferlyApp {
         self.confirm_delete_wallet = false;
         self.pending_backup_overwrite = None;
         self.confirm_negative_cents = None;
+        if let Some(session) = self.entry_edit.take() {
+            self.draft = session.stashed_draft;
+        }
+        self.undo = None;
         self.clear_pin_digits();
         self.cleanup_temp_artifacts();
         self.set_status_info("Locked. Unlock parent mode to make changes.");
