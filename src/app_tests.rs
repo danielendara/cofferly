@@ -1852,25 +1852,25 @@ fn invalid_transaction_does_not_mutate_or_create_a_file() {
 }
 
 #[test]
-fn add_entry_write_failure_keeps_ledger_and_reports_status_error() {
+fn add_entry_write_failure_rolls_back_and_keeps_the_draft() {
     let (mut app, dir) = test_app();
     app.data_path = unwritable_data_path(&dir);
     app.draft.kind = EntryKind::Deposit;
     app.draft.description = "Weekly allowance".to_owned();
     app.draft.amount = "$10.50".to_owned();
+    let date_before = app.draft.date_input.clone();
 
     app.add_entry();
 
     assert_eq!(app.status.severity, StatusSeverity::Error);
     assert!(app.status.text.starts_with("Could not save:"));
-    assert_eq!(app.selected_wallet().entries.len(), 1);
-    assert_eq!(
-        app.selected_wallet().entries[0].description,
-        "Weekly allowance"
-    );
-    assert_eq!(app.selected_wallet().entries[0].amount_cents, 1050);
-    assert!(app.draft.description.is_empty());
-    assert!(app.draft.amount.is_empty());
+    assert!(app.status.text.ends_with("The entry was not recorded."));
+    assert!(app.selected_wallet().entries.is_empty());
+    assert_eq!(app.draft.description, "Weekly allowance");
+    assert_eq!(app.draft.amount, "$10.50");
+    assert_eq!(app.draft.kind, EntryKind::Deposit);
+    assert_eq!(app.draft.date_input, date_before);
+    assert_eq!(app.pending_entry_focus, Some(EntryFormField::Description));
     assert!(app.raw_bytes.is_none());
     assert!(!app.data_path.exists());
 }
@@ -1892,6 +1892,7 @@ fn add_entry_write_failure_leaves_existing_vault_bytes_unchanged() {
     app.draft.kind = EntryKind::Deposit;
     app.draft.description = "Unsaved allowance".to_owned();
     app.draft.amount = "7".to_owned();
+    let date_before = app.draft.date_input.clone();
     let original_permissions = std::fs::metadata(dir.path()).unwrap().permissions();
     let mut readonly = original_permissions.clone();
     readonly.set_mode(0o500);
@@ -1901,14 +1902,12 @@ fn add_entry_write_failure_leaves_existing_vault_bytes_unchanged() {
 
     assert_eq!(app.status.severity, StatusSeverity::Error);
     assert!(app.status.text.starts_with("Could not save:"));
-    assert_eq!(app.selected_wallet().entries.len(), 2);
-    assert_eq!(
-        app.selected_wallet().entries[1].description,
-        "Unsaved allowance"
-    );
-    assert_eq!(app.selected_wallet().entries[1].amount_cents, 700);
-    assert!(app.draft.description.is_empty());
-    assert!(app.draft.amount.is_empty());
+    assert_eq!(app.selected_wallet().entries.len(), 1);
+    assert_eq!(app.selected_wallet().current_balance_cents(), 500);
+    assert_eq!(app.draft.description, "Unsaved allowance");
+    assert_eq!(app.draft.amount, "7");
+    assert_eq!(app.draft.kind, EntryKind::Deposit);
+    assert_eq!(app.draft.date_input, date_before);
     assert_eq!(app.raw_bytes, original_raw_bytes);
     assert_eq!(std::fs::read(&app.data_path).unwrap(), original);
     assert_eq!(saved_data(&app, "1234").wallets[0].entries.len(), 1);

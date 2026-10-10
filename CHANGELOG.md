@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Roll back a new entry and keep the typed form when the vault save fails, so the ledger never shows an entry that is not on disk. (#213)
+
 ## 0.4.0 — 2026-10-06
 
 ### Features
