@@ -731,6 +731,7 @@ impl CofferlyApp {
 
         if let Some(progress) = goal {
             let label = progress.label();
+            let accessible = progress.accessible_label(&name);
             ui.add_space(8.0);
             ui.add(
                 egui::ProgressBar::new(progress.fraction)
@@ -742,7 +743,16 @@ impl CofferlyApp {
                     })
                     // Square caps so a 0% (negative or empty) balance stays empty.
                     .corner_radius(egui::CornerRadius::ZERO),
-            );
+            )
+            .widget_info(|| {
+                let mut info = egui::WidgetInfo::labeled(
+                    egui::WidgetType::ProgressIndicator,
+                    true,
+                    accessible.clone(),
+                );
+                info.value = Some((progress.fraction as f64 * 100.0).floor());
+                info
+            });
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new(label)
