@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### UX
+
+- Locking now ends an in-progress "Correct an entry" session and drops the pending Undo, so neither survives to the next unlock. (#214)
+
 ## 0.4.0 — 2026-10-06
 
 ### Features
