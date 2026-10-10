@@ -1570,6 +1570,23 @@ impl CofferlyApp {
             wallet_name
         );
 
+        let secret = if self.session.is_some() {
+            String::new()
+        } else {
+            self.data.parent_pin.clone()
+        };
+        if let Err(err) = self.save_encrypted_data_and_refresh_ref(&secret) {
+            // Roll the entry back and keep the draft so Enter retries it — an
+            // unsaved entry must not survive in memory as if it had been written.
+            self.selected_wallet_mut().entries.pop();
+            self.invalidate_ledger_cache();
+            self.pending_entry_focus = Some(EntryFormField::Description);
+            self.set_status_err(format!(
+                "Could not save: {err}. The entry was not recorded."
+            ));
+            return;
+        }
+
         self.draft.description.clear();
         self.draft.amount.clear();
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
@@ -1578,7 +1595,7 @@ impl CofferlyApp {
         // focus happened to be.
         self.pending_entry_focus = Some(EntryFormField::Description);
         self.invalidate_ledger_cache();
-        self.save_with_success(status);
+        self.set_status_ok(status);
     }
 
     /// Opens a correction for one entry: the add form is stashed and reloaded
