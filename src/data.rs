@@ -112,6 +112,23 @@ impl SavingsGoalProgress {
             )
         }
     }
+
+    /// Screen-reader name for the goal bar; the visible label alone never says whose goal it is.
+    pub fn accessible_label(self, child_name: &str) -> String {
+        if self.reached {
+            format!(
+                "{child_name} savings goal reached: {}",
+                crate::money::format_money(self.goal_cents)
+            )
+        } else {
+            format!(
+                "{child_name} savings goal: {} of {}, {} to go",
+                crate::money::format_money(self.balance_cents),
+                crate::money::format_money(self.goal_cents),
+                crate::money::format_money(self.remaining_cents)
+            )
+        }
+    }
 }
 
 /// What one catch-up pass did for a wallet.
@@ -1378,5 +1395,23 @@ mod tests {
         );
         wallet.savings_goal_cents = None;
         assert!(wallet.savings_goal_progress().is_none());
+    }
+
+    #[test]
+    fn savings_goal_accessible_label_names_the_child_and_amounts() {
+        let goal = 12_000;
+        let name = "Child 1";
+        assert_eq!(
+            SavingsGoalProgress::from_balance(4_500, goal).accessible_label(name),
+            "Child 1 savings goal: $45.00 of $120.00, $75.00 to go"
+        );
+        assert_eq!(
+            SavingsGoalProgress::from_balance(15_000, goal).accessible_label(name),
+            "Child 1 savings goal reached: $120.00"
+        );
+        assert_eq!(
+            SavingsGoalProgress::from_balance(-500, goal).accessible_label(name),
+            "Child 1 savings goal: -$5.00 of $120.00, $125.00 to go"
+        );
     }
 }
