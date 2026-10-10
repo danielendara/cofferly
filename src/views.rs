@@ -1024,16 +1024,34 @@ impl CofferlyApp {
                                     .size(11.0)
                                     .color(theme::TEXT_SECONDARY),
                                 );
+                                let preview = self.latest_entry_preview();
+                                if let Some(p) = &preview {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(format!("Next to remove: {p}"))
+                                            .size(12.0)
+                                            .color(theme::TEXT_PRIMARY),
+                                    );
+                                }
                                 ui.add_space(6.0);
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .add_enabled(
-                                            has_entries,
-                                            egui::Button::new("Remove latest entry")
-                                                .min_size(egui::vec2(152.0, 36.0)),
-                                        )
-                                        .clicked()
-                                    {
+                                    let remove_response = ui.add_enabled(
+                                        has_entries,
+                                        egui::Button::new("Remove latest entry")
+                                            .min_size(egui::vec2(152.0, 36.0)),
+                                    );
+                                    if let Some(p) = &preview {
+                                        let label = format!("Remove latest entry: {p}");
+                                        remove_response.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::WidgetType::Button,
+                                                has_entries,
+                                                label.clone(),
+                                            )
+                                        });
+                                        remove_response.clone().on_hover_text(label.clone());
+                                    }
+                                    if remove_response.clicked() {
                                         self.remove_latest_entry();
                                     }
                                     if let Some((wallet_index, amount_cents)) = self.pending_undo_summary() {

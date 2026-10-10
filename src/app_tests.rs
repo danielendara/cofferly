@@ -2312,6 +2312,38 @@ fn remove_latest_entry_removes_newest_by_date_not_append_order() {
 }
 
 #[test]
+fn latest_entry_preview_names_the_entry_remove_latest_will_remove() {
+    let (mut app, _dir) = test_app();
+    assert!(app.latest_entry_preview().is_none());
+
+    let today = Local::now().date_naive();
+    app.draft.kind = EntryKind::Deposit;
+    app.draft.description = "Weekly allowance".to_owned();
+    app.draft.amount = "5".to_owned();
+    app.draft.date_input = format_ledger_date(today);
+    app.add_entry();
+
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Comic book".to_owned();
+    app.draft.amount = "3".to_owned();
+    app.draft.date_input = format_ledger_date(today - chrono::Duration::days(7));
+    app.add_entry();
+
+    assert_eq!(app.selected_wallet().entries.len(), 2);
+    assert_eq!(
+        app.latest_entry_preview(),
+        Some(format!(
+            "{} · Weekly allowance · $5.00",
+            format_ledger_date(today)
+        ))
+    );
+
+    app.remove_latest_entry();
+    assert_eq!(app.selected_wallet().entries.len(), 1);
+    assert_eq!(app.selected_wallet().entries[0].description, "Comic book");
+}
+
+#[test]
 fn add_entry_can_use_an_earlier_date() {
     let (mut app, _dir) = test_app();
     app.draft.kind = EntryKind::Deposit;
