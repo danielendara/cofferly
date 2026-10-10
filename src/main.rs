@@ -2095,6 +2095,19 @@ impl CofferlyApp {
             .map(|(index, _)| index)
     }
 
+    /// What "Remove latest entry" would take out, as the ledger shows it.
+    /// Uses the same pick as the removal (newest by date, then list order).
+    fn latest_entry_preview(&self) -> Option<String> {
+        let entries = &self.selected_wallet().entries;
+        let entry = &entries[Self::newest_entry_index(entries)?];
+        Some(format!(
+            "{} · {} · {}",
+            format_ledger_date(entry.date),
+            entry.description,
+            format_money(entry.amount_cents)
+        ))
+    }
+
     fn remove_latest_entry(&mut self) {
         if !self.can_change("Unlock parent mode before removing entries.") {
             return;
