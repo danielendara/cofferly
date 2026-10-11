@@ -2228,6 +2228,7 @@ impl CofferlyApp {
             &path,
             &[self.selected_wallet().clone()],
             filter.as_deref().unwrap_or(""),
+            Local::now().date_naive(),
         ) {
             Ok(path) => self.open_selected_export(path, "printable ledger", filter.as_deref()),
             Err(err) => self.set_status_err(format!("Could not create printable ledger: {err}")),
@@ -2245,7 +2246,7 @@ impl CofferlyApp {
             return;
         };
         // Full book: the selected wallet's description filter does not apply.
-        match write_printable_ledger(&path, &self.data.wallets) {
+        match write_printable_ledger(&path, &self.data.wallets, Local::now().date_naive()) {
             Ok(path) => self.open_export_file(path, "printable ledger"),
             Err(err) => self.set_status_err(format!("Could not create printable ledger: {err}")),
         }
