@@ -1770,7 +1770,7 @@ impl CofferlyApp {
                                 .size(12.0)
                                 .color(theme::TEXT_PRIMARY)
                         };
-                        ui.label(desc);
+                        ui.add(egui::Label::new(desc).truncate());
                     });
                     row.col(|ui| {
                         let amount_text =
