@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Printed ledgers say the date they were printed (`Printed MM/DD/YYYY` under each child's balance) and the page title includes it, so saved copies get distinct names. (#225)
+
 ### Fixes
 
 - Reject entry dates with a two- or three-digit year (e.g. `10/08/26`) instead of saving them as the year 0026. (#217)
