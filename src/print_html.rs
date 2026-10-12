@@ -233,7 +233,7 @@ mod tests {
     fn printable_ledger_includes_the_savings_goal_when_set() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.html");
-        let mut wallets = sample_wallets();
+        let mut wallets = crate::data::snack_allowance_bus_fare_test_wallets();
         wallets[0].savings_goal_cents = Some(12_000);
         wallets[0].starting_balance_cents = 4_500;
         wallets[0].entries.clear();
@@ -261,7 +261,7 @@ mod tests {
     fn filtered_printable_ledger_keeps_start_row_and_full_running_balance() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.html");
-        let wallets = sample_wallets();
+        let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
         let written =
             write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap();
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn filtered_printable_ledger_says_it_is_filtered() {
         let dir = tempdir().unwrap();
-        let wallets = sample_wallets();
+        let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
         let path = dir.path().join("ledger.html");
         let html = std::fs::read_to_string(
@@ -322,7 +322,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.html");
         let html = std::fs::read_to_string(
-            write_printable_ledger(&path, &sample_wallets(), printed_on()).unwrap(),
+            write_printable_ledger(
+                &path,
+                &crate::data::snack_allowance_bus_fare_test_wallets(),
+                printed_on(),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(!html.contains("class=\"filter\""));
@@ -332,7 +337,7 @@ mod tests {
     #[test]
     fn printable_ledger_says_when_it_was_printed() {
         let dir = tempdir().unwrap();
-        let wallets = sample_wallets();
+        let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
         let path = dir.path().join("all.html");
         let html =
@@ -356,44 +361,5 @@ mod tests {
 
     fn printed_on() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, 10).unwrap()
-    }
-
-    fn sample_wallets() -> Vec<Wallet> {
-        vec![
-            Wallet {
-                child_name: "Child 1".to_owned(),
-                starting_balance_cents: 1_000,
-                entries: vec![
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
-                        description: "Snack early".to_owned(),
-                        amount_cents: -200,
-                    },
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
-                        description: "Weekly allowance".to_owned(),
-                        amount_cents: 1_000,
-                    },
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
-                        description: "Snack late".to_owned(),
-                        amount_cents: -100,
-                    },
-                ],
-                weekly_allowance: None,
-                savings_goal_cents: None,
-            },
-            Wallet {
-                child_name: "Child 2".to_owned(),
-                starting_balance_cents: 0,
-                entries: vec![Entry {
-                    date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
-                    description: "Bus fare".to_owned(),
-                    amount_cents: -300,
-                }],
-                weekly_allowance: None,
-                savings_goal_cents: None,
-            },
-        ]
     }
 }

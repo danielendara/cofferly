@@ -26,19 +26,19 @@ pub struct Wallet {
     pub child_name: String,
     pub starting_balance_cents: i64,
     pub entries: Vec<Entry>,
-    /// Optional auto-posted weekly allowance (#179). `None` = off. Defaulted so
+    /// Optional auto-posted weekly allowance. `None` = off. Defaulted so
     /// older vaults and backups load unchanged, and omitted when off so they
     /// also serialize unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekly_allowance: Option<WeeklyAllowance>,
-    /// Optional amount this wallet is saving toward (#181). `None` = no goal.
+    /// Optional amount this wallet is saving toward. `None` = no goal.
     /// Defaulted so older vaults and backups load unchanged, and omitted when
     /// unset so they also serialize unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub savings_goal_cents: Option<i64>,
 }
 
-/// Weekly allowance (#179). `enabled_on` is the posting weekday; that calendar
+/// Weekly allowance. `enabled_on` is the posting weekday; that calendar
 /// day itself does not post. `last_posted` only moves forward (monotonic) and
 /// is saved with the entries it covers so unlock/relaunch/restore never double-posts.
 /// Catch-up is capped at [`MAX_ALLOWANCE_CATCH_UP_WEEKS`]; older missed weeks are skipped.
@@ -592,6 +592,48 @@ fn clamp_cents(cents: i64) -> i64 {
     cents.clamp(-MAX_ABSOLUTE_CENTS, MAX_ABSOLUTE_CENTS)
 }
 
+/// Two-child wallets with snack, weekly allowance, and bus fare entries for
+/// filtered export/print tests.
+#[cfg(test)]
+pub(crate) fn snack_allowance_bus_fare_test_wallets() -> Vec<Wallet> {
+    vec![
+        Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 1_000,
+            entries: vec![
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                    description: "Snack early".to_owned(),
+                    amount_cents: -200,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+                    description: "Weekly allowance".to_owned(),
+                    amount_cents: 1_000,
+                },
+                Entry {
+                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+                    description: "Snack late".to_owned(),
+                    amount_cents: -100,
+                },
+            ],
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        },
+        Wallet {
+            child_name: "Child 2".to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![Entry {
+                date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
+                description: "Bus fare".to_owned(),
+                amount_cents: -300,
+            }],
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -867,35 +909,9 @@ mod tests {
         assert_eq!(descriptions, ["Starting balance", "First", "Second"]);
     }
 
-    fn filter_test_wallet() -> Wallet {
-        Wallet {
-            child_name: "Child 1".to_owned(),
-            starting_balance_cents: 1000,
-            entries: vec![
-                Entry {
-                    date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
-                    description: "Weekly allowance".to_owned(),
-                    amount_cents: 500,
-                },
-                Entry {
-                    date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
-                    description: "Snack".to_owned(),
-                    amount_cents: -200,
-                },
-                Entry {
-                    date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
-                    description: "Birthday gift".to_owned(),
-                    amount_cents: 2500,
-                },
-            ],
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        }
-    }
-
     #[test]
     fn ledger_filter_summary_is_a_single_pass_over_filter_count_and_net() {
-        let wallet = filter_test_wallet();
+        let wallet = snack_allowance_bus_fare_test_wallets()[0].clone();
         let rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
 
         struct Case {
@@ -910,24 +926,24 @@ mod tests {
                 query: "",
                 descriptions: &[
                     "Starting balance",
+                    "Snack early",
                     "Weekly allowance",
-                    "Snack",
-                    "Birthday gift",
+                    "Snack late",
                 ],
                 matching_entry_count: 3,
-                matching_net_cents: 2_800,
+                matching_net_cents: 700,
             },
             Case {
                 query: "ALLOW",
                 descriptions: &["Starting balance", "Weekly allowance"],
                 matching_entry_count: 1,
-                matching_net_cents: 500,
+                matching_net_cents: 1_000,
             },
             Case {
                 query: "snack",
-                descriptions: &["Starting balance", "Snack"],
-                matching_entry_count: 1,
-                matching_net_cents: -200,
+                descriptions: &["Starting balance", "Snack early", "Snack late"],
+                matching_entry_count: 2,
+                matching_net_cents: -300,
             },
             Case {
                 query: "nonexistent",
@@ -939,12 +955,12 @@ mod tests {
                 query: "   ",
                 descriptions: &[
                     "Starting balance",
+                    "Snack early",
                     "Weekly allowance",
-                    "Snack",
-                    "Birthday gift",
+                    "Snack late",
                 ],
                 matching_entry_count: 3,
-                matching_net_cents: 2_800,
+                matching_net_cents: 700,
             },
         ];
 
