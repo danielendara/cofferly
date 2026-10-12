@@ -32,6 +32,8 @@ Cofferly starts with two neutral child wallets. Each wallet keeps a local ledger
 
 **Latest release (recommended):** [Cofferly releases on GitHub](https://github.com/danielendara/cofferly/releases/latest)
 
+GitHub’s **Latest** release is still **v0.2.0** (verify with `gh release list`); this README tracks **main**, which is **0.4.0** and not yet tagged.
+
 | Asset | What it is |
 |-------|------------|
 | `Cofferly-*-windows-x64.zip` | Portable app — unzip and run `Cofferly.exe` |
@@ -70,7 +72,7 @@ Cofferly starts with `Child 1` and `Child 2` so the public app does not include 
 
 After unlocking parent mode, open **Settings** to rename the selected wallet, update its starting balance, add another child wallet, or delete a wallet. Wallet deletion uses a confirm/cancel step and keeps at least one wallet available.
 
-Use **Remove latest entry** in Settings to undo the most recent ledger entry for the selected wallet. The app offers a short undo window before the next change.
+Use **Remove latest entry** in Settings to delete the **newest-dated** row for the selected wallet (not necessarily the last one you added when the ledger is backdated). Settings shows a **Next to remove:** preview (date, description, amount) so you know which row will go. The app offers a short undo window before the next change.
 
 ### Weekly allowance
 
@@ -86,7 +88,7 @@ In **Settings**, each wallet has an optional **Savings goal** amount. Leave it b
 
 ## Printing and CSV export
 
-Use **Print this wallet** to print the selected child's ledger, or **Print all wallets** to print every child wallet together.
+Use **Print this wallet** to print the selected child's ledger, or **Print all wallets** to print every child wallet together. Each printed page shows `Printed MM/DD/YYYY` under the balance, and the browser tab title includes that date so saved copies are easy to tell apart.
 
 Use **Export this wallet CSV** or **Export all wallets CSV** for a spreadsheet backup. Amounts are plain decimals (no `$`) so Excel, Numbers, and LibreOffice can sum them.
 
@@ -103,15 +105,7 @@ A backup is as private as the vault: without its Coffer Story it can't be opened
 
 ## Windows Installer
 
-The repository includes an Inno Setup script at `installer/Cofferly.iss`.
-
-Build the release executable first:
-
-```powershell
-cargo build --release
-```
-
-Then open `installer/Cofferly.iss` in Inno Setup and compile the installer. The installer output is written to `dist/`.
+See [Windows Installer](docs/RELEASE.md#windows-installer) in the release checklist for CI, local Inno Setup steps, and where the setup executable is written.
 
 ## Development
 

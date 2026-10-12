@@ -25,7 +25,7 @@ if (-not (Test-Path $cargo)) {
 Push-Location $root
 try {
     if (-not $SkipBuild) {
-        & $cargo build --release
+        & $cargo build --release --locked
     }
 
     if (Test-Path $packageDir) {
