@@ -93,6 +93,7 @@ Before publishing, open Cofferly and verify:
 - When both data files exist, `vault.cofferly` takes precedence and neither file is modified during startup.
 - Print this wallet opens a printable browser page.
 - Print all wallets opens every wallet in one printable page.
+- Printed pages show `Printed MM/DD/YYYY` under each balance, and the browser tab title includes that date.
 - Export this wallet CSV and Export all wallets CSV open a local spreadsheet file (no `$` in amounts).
 - Back up vault writes a verified `Cofferly-backup-YYYY-MM-DD.cofferly` and shows Last backup in Settings.
 - Restore from backup previews wallets, confirms before replace, and keeps `vault.pre-restore-<timestamp>.cofferly`.

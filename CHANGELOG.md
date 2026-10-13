@@ -4,7 +4,7 @@
 
 ### Features
 
-- Printed ledgers say the date they were printed (`Printed MM/DD/YYYY` under each child's balance) and the page title includes it, so saved copies get distinct names. (#225)
+- Printed ledgers say the date they were printed (`Printed MM/DD/YYYY` under each child's balance) and the page title includes it, so saved copies get distinct names. (#227)
 
 ### Fixes
 
