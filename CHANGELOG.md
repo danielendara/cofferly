@@ -20,6 +20,7 @@
 - Locking now ends an in-progress "Correct an entry" session and drops the pending Undo, so neither survives to the next unlock. (#214)
 - Settings shows which entry "Remove latest entry" will remove (date, description, amount), so backdated entries don't cause surprise removals. (#219)
 - Long ledger descriptions are cut off with "…" to fit the Description column, and hovering shows the full text. (#224)
+- The correction form can remove any single ledger entry, not just the latest, and the removal can be undone. (#233)
 
 ## 0.4.0 — 2026-10-06
 
