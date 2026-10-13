@@ -1,12 +1,19 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::data::{ledger_filter_summary, LedgerSort, Wallet};
+use chrono::NaiveDate;
+
+use crate::data::{format_ledger_date, ledger_filter_summary, LedgerSort, Wallet};
 use crate::money::format_money;
 
 /// Write a printable HTML ledger to `path` (typically under the OS temp directory).
-pub fn write_printable_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
-    write_printable_ledger_filtered(path, wallets, "")
+/// `printed_on` is shown on each wallet and in the page title.
+pub fn write_printable_ledger(
+    path: &PathBuf,
+    wallets: &[Wallet],
+    printed_on: NaiveDate,
+) -> Result<PathBuf, String> {
+    write_printable_ledger_filtered(path, wallets, "", printed_on)
 }
 
 /// Like [`write_printable_ledger`], but a non-empty `description_filter` keeps
@@ -16,17 +23,20 @@ pub fn write_printable_ledger_filtered(
     path: &PathBuf,
     wallets: &[Wallet],
     description_filter: &str,
+    printed_on: NaiveDate,
 ) -> Result<PathBuf, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
+    let printed = format_ledger_date(printed_on);
     let mut body = String::new();
     for wallet in wallets {
         let mut header = format!(
-            "<section><h1>{}</h1><p class=\"balance\">Current balance: {}</p>",
+            "<section><h1>{}</h1><p class=\"balance\">Current balance: {}</p><p class=\"printed\">Printed {}</p>",
             escape_html(&wallet.child_name),
-            format_money(wallet.current_balance_cents())
+            format_money(wallet.current_balance_cents()),
+            printed
         );
         if let Some(progress) = wallet.savings_goal_progress() {
             header.push_str(&format!(
@@ -75,12 +85,13 @@ pub fn write_printable_ledger_filtered(
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Cofferly Ledger</title>
+<title>Cofferly Ledger – {printed}</title>
 <style>
 body {{ font-family: "Segoe UI", Arial, sans-serif; color: #22333b; margin: 36px; }}
 section {{ break-after: page; margin-bottom: 40px; }}
 h1 {{ font-size: 34px; margin: 0 0 6px; }}
 .balance {{ font-size: 20px; font-weight: 700; margin: 0 0 18px; }}
+.printed {{ font-size: 13px; color: #4b5b62; margin: -12px 0 18px; }}
 .goal {{ font-size: 16px; margin: -10px 0 18px; }}
 table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
 th, td {{ border: 1px solid #9aa7ad; padding: 8px 10px; text-align: left; }}
@@ -141,7 +152,6 @@ fn escape_html(input: &str) -> String {
 mod tests {
     use super::*;
     use crate::data::Entry;
-    use chrono::NaiveDate;
     use tempfile::tempdir;
 
     #[test]
@@ -175,7 +185,7 @@ mod tests {
             savings_goal_cents: None,
         }];
 
-        let written = write_printable_ledger(&path, &wallets).unwrap();
+        let written = write_printable_ledger(&path, &wallets, printed_on()).unwrap();
         let html = std::fs::read_to_string(&written).unwrap();
 
         assert_eq!(written, path);
@@ -212,7 +222,8 @@ mod tests {
         }];
 
         let html =
-            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets, printed_on()).unwrap())
+                .unwrap();
 
         assert!(html.contains("Backdated</td><td class=\"minus\">-$5.00</td><td>-$5.00</td>"));
         assert!(html.contains("<td>$5.00</td>"));
@@ -228,18 +239,21 @@ mod tests {
         wallets[0].entries.clear();
 
         let html =
-            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets, printed_on()).unwrap())
+                .unwrap();
         assert!(html.contains("Savings goal: $45.00 of $120.00 · $75.00 to go"));
         assert!(!html.contains("Goal reached"));
 
         wallets[0].starting_balance_cents = 12_000;
         let reached =
-            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets, printed_on()).unwrap())
+                .unwrap();
         assert!(reached.contains("Savings goal: Goal reached"));
 
         wallets[0].savings_goal_cents = None;
         let cleared =
-            std::fs::read_to_string(write_printable_ledger(&path, &wallets).unwrap()).unwrap();
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets, printed_on()).unwrap())
+                .unwrap();
         assert!(!cleared.contains("Savings goal"));
     }
 
@@ -249,7 +263,8 @@ mod tests {
         let path = dir.path().join("ledger.html");
         let wallets = sample_wallets();
 
-        let written = write_printable_ledger_filtered(&path, &wallets[..1], "snack").unwrap();
+        let written =
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap();
         let html = std::fs::read_to_string(&written).unwrap();
 
         assert!(html.contains("Starting balance"));
@@ -266,7 +281,8 @@ mod tests {
 
         let all = dir.path().join("all.html");
         let all_html =
-            std::fs::read_to_string(write_printable_ledger(&all, &wallets).unwrap()).unwrap();
+            std::fs::read_to_string(write_printable_ledger(&all, &wallets, printed_on()).unwrap())
+                .unwrap();
         assert!(all_html.contains("Weekly allowance"));
         assert!(all_html.contains("Child 2"));
         assert!(all_html.contains("Bus fare"));
@@ -279,7 +295,7 @@ mod tests {
 
         let path = dir.path().join("ledger.html");
         let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "snack").unwrap(),
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap(),
         )
         .unwrap();
         assert!(html.contains("Showing 2 of 3 entries matching"));
@@ -287,14 +303,15 @@ mod tests {
 
         let path = dir.path().join("escaped.html");
         let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "<b>snack").unwrap(),
+            write_printable_ledger_filtered(&path, &wallets[..1], "<b>snack", printed_on())
+                .unwrap(),
         )
         .unwrap();
         assert!(html.contains("matching “&lt;b&gt;snack”"));
 
         let path = dir.path().join("blank.html");
         let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "  ").unwrap(),
+            write_printable_ledger_filtered(&path, &wallets[..1], "  ", printed_on()).unwrap(),
         )
         .unwrap();
         assert!(!html.contains("class=\"filter\""));
@@ -304,11 +321,41 @@ mod tests {
     fn unfiltered_printable_ledger_has_no_filter_note_or_rule() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.html");
-        let html =
-            std::fs::read_to_string(write_printable_ledger(&path, &sample_wallets()).unwrap())
-                .unwrap();
+        let html = std::fs::read_to_string(
+            write_printable_ledger(&path, &sample_wallets(), printed_on()).unwrap(),
+        )
+        .unwrap();
         assert!(!html.contains("class=\"filter\""));
         assert!(!html.contains(".filter"));
+    }
+
+    #[test]
+    fn printable_ledger_says_when_it_was_printed() {
+        let dir = tempdir().unwrap();
+        let wallets = sample_wallets();
+
+        let path = dir.path().join("all.html");
+        let html =
+            std::fs::read_to_string(write_printable_ledger(&path, &wallets, printed_on()).unwrap())
+                .unwrap();
+        assert_eq!(
+            html.matches("<p class=\"printed\">Printed 10/10/2026</p>")
+                .count(),
+            2
+        );
+        assert!(html.contains("<title>Cofferly Ledger – 10/10/2026</title>"));
+
+        let path = dir.path().join("filtered.html");
+        let html = std::fs::read_to_string(
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap(),
+        )
+        .unwrap();
+        assert!(html.contains("<p class=\"printed\">Printed 10/10/2026</p>"));
+        assert!(html.contains("<title>Cofferly Ledger – 10/10/2026</title>"));
+    }
+
+    fn printed_on() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, 10).unwrap()
     }
 
     fn sample_wallets() -> Vec<Wallet> {

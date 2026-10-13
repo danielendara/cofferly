@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Printed ledgers say the date they were printed (`Printed MM/DD/YYYY` under each child's balance) and the page title includes it, so saved copies get distinct names. (#225)
+
 ### Fixes
 
 - Reject entry dates with a two- or three-digit year (e.g. `10/08/26`) instead of saving them as the year 0026. (#217)
@@ -15,6 +19,7 @@
 
 - Locking now ends an in-progress "Correct an entry" session and drops the pending Undo, so neither survives to the next unlock. (#214)
 - Settings shows which entry "Remove latest entry" will remove (date, description, amount), so backdated entries don't cause surprise removals. (#219)
+- Long ledger descriptions are cut off with "…" to fit the Description column, and hovering shows the full text. (#224)
 
 ## 0.4.0 — 2026-10-06
 
