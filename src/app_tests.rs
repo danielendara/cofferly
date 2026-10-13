@@ -3190,3 +3190,173 @@ mod savings_goal {
         assert!(!app.savings_goal_save_ready());
     }
 }
+
+// --- vault write-failure rollback (save_with_success_or_restore) ---------------
+//
+// Each mutation below snapshots `AppData` (+ selection/undo/filter state)
+// before saving; a failed vault write must leave memory equal to what is on
+// disk and surface a status error. `update_starting_balance` intentionally
+// keeps its in-memory value and is covered by
+// `starting_balance_write_failure_keeps_memory_and_reports_status_error`.
+
+fn data_snapshot(app: &CofferlyApp) -> String {
+    serde_json::to_string(&app.data).expect("test snapshot serializes")
+}
+
+#[test]
+fn remove_latest_entry_write_failure_restores_ledger_and_undo() {
+    let (mut app, dir) = app_with_entries();
+    let before_entries = app.selected_wallet().entries.clone();
+    let before_data = data_snapshot(&app);
+    let before_raw = app.raw_bytes.clone();
+    assert!(app.undo.is_none());
+    app.data_path = unwritable_data_path(&dir);
+
+    app.remove_latest_entry();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.selected_wallet().entries, before_entries);
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.raw_bytes, before_raw);
+    assert!(app.undo.is_none(), "failed removal must not leave an undo");
+}
+
+#[test]
+fn undo_removed_entry_write_failure_restores_ledger_and_undo() {
+    let (mut app, dir) = app_with_entries();
+    app.remove_latest_entry();
+    assert!(app.undo.is_some());
+    let before_entries = app.selected_wallet().entries.clone();
+    let before_data = data_snapshot(&app);
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.undo_remove_entry();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.selected_wallet().entries, before_entries);
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.raw_bytes, before_raw);
+    assert!(app.undo.is_some(), "failed undo must keep the pending undo");
+}
+
+#[test]
+fn undo_edited_entry_write_failure_restores_ledger_and_undo() {
+    let (mut app, dir) = app_with_entries();
+    app.begin_entry_edit(0);
+    app.draft.amount = "20.00".to_owned();
+    app.draft.description = "Birthday cash".to_owned();
+    app.commit_entry_edit();
+    assert!(app.undo.is_some());
+    let before_entries = app.selected_wallet().entries.clone();
+    let before_data = data_snapshot(&app);
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.undo_remove_entry();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.selected_wallet().entries, before_entries);
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.raw_bytes, before_raw);
+    assert!(app.undo.is_some(), "failed undo must keep the pending undo");
+}
+
+#[test]
+fn delete_selected_wallet_write_failure_restores_wallets_and_selection() {
+    let (mut app, dir) = test_app();
+    let wallet_count = app.data.wallets.len();
+    assert!(wallet_count >= 2);
+    let before_data = data_snapshot(&app);
+    let before_selected = app.selected_wallet;
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.delete_selected_wallet();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.data.wallets.len(), wallet_count);
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.selected_wallet, before_selected);
+    assert_eq!(app.raw_bytes, before_raw);
+}
+
+#[test]
+fn add_child_wallet_write_failure_restores_wallets_and_selection() {
+    let (mut app, dir) = test_app();
+    let wallet_count = app.data.wallets.len();
+    let before_data = data_snapshot(&app);
+    let before_selected = app.selected_wallet;
+    let before_raw = app.raw_bytes.clone();
+    app.new_child_name_input = "Sam".to_owned();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.add_child_wallet();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.data.wallets.len(), wallet_count);
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.selected_wallet, before_selected);
+    assert_eq!(app.raw_bytes, before_raw);
+    assert_eq!(app.new_child_name_input, "Sam");
+}
+
+#[test]
+fn rename_selected_child_write_failure_restores_name_and_filters() {
+    let (mut app, dir) = test_app();
+    app.ledger_filter = "snack".to_owned();
+    app.child_name_input = "Sam".to_owned();
+    let before_data = data_snapshot(&app);
+    let before_filters = app.ledger_filters.clone();
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.rename_selected_child();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert_eq!(app.selected_wallet().child_name, "Child 1");
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.ledger_filters, before_filters);
+    assert_eq!(app.raw_bytes, before_raw);
+}
+
+#[test]
+fn weekly_allowance_write_failure_restores_allowance() {
+    let (mut app, dir) = test_app();
+    let today = NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+    app.weekly_allowance_input = "5".to_owned();
+    let before_data = data_snapshot(&app);
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.save_weekly_allowance_on(today);
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert!(app.selected_wallet().weekly_allowance.is_none());
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.raw_bytes, before_raw);
+}
+
+#[test]
+fn savings_goal_write_failure_restores_goal() {
+    let (mut app, dir) = test_app();
+    app.savings_goal_input = "120".to_owned();
+    let before_data = data_snapshot(&app);
+    let before_raw = app.raw_bytes.clone();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.save_savings_goal();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert!(app.status.text.starts_with("Could not save:"));
+    assert!(app.selected_wallet().savings_goal_cents.is_none());
+    assert_eq!(data_snapshot(&app), before_data);
+    assert_eq!(app.raw_bytes, before_raw);
+}
