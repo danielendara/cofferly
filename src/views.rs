@@ -1,9 +1,9 @@
 //! Rendering of the app's screens: the lock / Coffer Story (and legacy PIN) flows, the wallet header,
 //! the entry form, the ledger table, and the settings window.
 //!
-//! These methods all belong to the same `impl CofferlyApp` block declared in
-//! `main.rs`. Field privacy is unaffected because the block is in the same
-//! crate as the struct definition.
+//! `CofferlyApp` is defined in `main.rs`; its screen-rendering methods live in
+//! the `impl` block below. Field privacy is unaffected because both modules are
+//! in the same crate as the struct.
 
 use eframe::egui;
 
@@ -600,7 +600,7 @@ impl CofferlyApp {
         });
     }
 
-    /// Restore step 3 (#177): show the backup's wallets and confirm the replace.
+    /// Restore step 3: show the backup's wallets and confirm the replace.
     fn restore_confirm_panel(&mut self, ui: &mut egui::Ui) {
         let Some(restore) = &self.restore else {
             return;
@@ -822,64 +822,12 @@ impl CofferlyApp {
                 ui.separator();
                 ui.add_space(10.0);
 
-                let capturing = self.capturing;
                 egui::ScrollArea::vertical()
                     .id_salt("settings_content")
                     .auto_shrink([false, false])
                     .max_height(scroll_height)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-
-                        // README capture: prioritize Coffer Story + danger zone so the new
-                        // parent-access section is visible without relying on scroll offset.
-                        if capturing {
-                            settings_section(
-                                ui,
-                                "Coffer Story",
-                                "Your generated six-object story encrypts the local wallet file. Keep its recovery copy away from this computer.",
-                                theme::FAINT_BG,
-                                egui::Stroke::new(1.0, theme::BORDER),
-                                theme::TEXT_PRIMARY,
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Cofferly does not keep a local bypass. If you lose the story and its recovery card, the encrypted ledger cannot be recovered.",
-                                        )
-                                        .size(12.0)
-                                        .color(theme::TEXT_SECONDARY),
-                                    );
-                                    ui.add_space(8.0);
-                                    let _ = ui.add_sized(
-                                        [178.0, 38.0],
-                                        egui::Button::new(
-                                            egui::RichText::new("Change Coffer Story")
-                                                .strong()
-                                                .color(egui::Color32::WHITE),
-                                        )
-                                        .fill(theme::ACCENT_DARK),
-                                    );
-                                },
-                            );
-                            ui.add_space(12.0);
-                            settings_section(
-                                ui,
-                                "Danger zone",
-                                "Deleting a wallet permanently removes its balance and transaction history.",
-                                theme::ERROR_LIGHT,
-                                egui::Stroke::new(1.0, theme::NEGATIVE),
-                                theme::NEGATIVE,
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            "Cofferly always keeps at least one wallet.",
-                                        )
-                                        .size(12.0)
-                                        .color(theme::TEXT_SECONDARY),
-                                    );
-                                },
-                            );
-                            return;
-                        }
 
                         settings_section(
                             ui,
@@ -2007,7 +1955,6 @@ fn settings_modal_width(viewport_width: f32) -> f32 {
 }
 
 fn settings_scroll_height(viewport_height: f32, capturing: bool) -> f32 {
-    // Documentation captures need the full Settings content (Coffer Story + danger zone).
     let max_height = if capturing { 1000.0 } else { 520.0 };
     (viewport_height - 210.0).clamp(260.0, max_height)
 }

@@ -22,7 +22,7 @@ use chrono::NaiveDate;
 use eframe::egui::{self, ColorImage};
 
 use crate::crypto::{self, SessionCrypto};
-use crate::data::{AppData, Entry, EntryKind, Wallet};
+use crate::data::{AppData, Entry, EntryKind, Wallet, WeeklyAllowance};
 use crate::io;
 use crate::money::format_money_input;
 use crate::story::{self, STORY_LENGTH};
@@ -238,8 +238,8 @@ fn demo_wallets() -> Vec<Wallet> {
                     amount_cents: -875,
                 },
             ],
-            weekly_allowance: None,
-            savings_goal_cents: None,
+            weekly_allowance: Some(WeeklyAllowance::starting(1_000, d(2026, 7, 1))),
+            savings_goal_cents: Some(5_000),
         },
     ]
 }
