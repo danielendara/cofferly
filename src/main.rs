@@ -147,6 +147,17 @@ struct EntryEditSession {
     stashed_draft: EntryDraft,
 }
 
+/// Pre-mutation snapshot for `save_with_success_or_restore`.
+#[derive(Debug, Clone)]
+struct MutationSnapshot {
+    data: AppData,
+    selected_wallet: usize,
+    ledger_filter: String,
+    ledger_filters: HashMap<String, String>,
+    undo: Option<PendingUndo>,
+    new_child_name_input: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusSeverity {
     Info,
@@ -1899,6 +1910,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before changing the weekly allowance.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -1952,7 +1964,7 @@ impl CofferlyApp {
         };
 
         self.prefill_settings_from_selected();
-        self.save_with_success(status);
+        self.save_with_success_or_restore(status, snapshot);
     }
 
     fn savings_goal_save_ready(&self) -> bool {
@@ -1973,6 +1985,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before changing the savings goal.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -2009,13 +2022,14 @@ impl CofferlyApp {
         };
 
         self.prefill_settings_from_selected();
-        self.save_with_success(status);
+        self.save_with_success_or_restore(status, snapshot);
     }
 
     fn rename_selected_child(&mut self) {
         if !self.can_change("Unlock parent mode before renaming wallets.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -2042,16 +2056,20 @@ impl CofferlyApp {
         // stays off: the field matches the selected wallet again.
         self.prefill_settings_from_selected();
         self.invalidate_ledger_cache();
-        self.save_with_success(format!(
-            "Renamed {previous_child_name} to {}.",
-            self.selected_wallet().child_name
-        ));
+        self.save_with_success_or_restore(
+            format!(
+                "Renamed {previous_child_name} to {}.",
+                self.selected_wallet().child_name
+            ),
+            snapshot,
+        );
     }
 
     fn add_child_wallet(&mut self) {
         if !self.can_change("Unlock parent mode before adding wallets.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -2080,7 +2098,7 @@ impl CofferlyApp {
         // prefill so Save stays disabled until this wallet's opening is edited.
         self.prefill_settings_from_selected();
         self.invalidate_ledger_cache();
-        self.save_with_success(format!("Added wallet for {name}."));
+        self.save_with_success_or_restore(format!("Added wallet for {name}."), snapshot);
     }
 
     fn newest_entry_index(entries: &[Entry]) -> Option<usize> {
@@ -2112,6 +2130,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before removing entries.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.confirm_delete_wallet = false;
 
         let wallet_name = self.selected_wallet().child_name.clone();
@@ -2123,12 +2142,15 @@ impl CofferlyApp {
                 entry: entry.clone(),
             }));
             self.invalidate_ledger_cache();
-            self.save_with_success(format!(
-                "Removed latest entry from {}: {} {}. Undo available.",
-                wallet_name,
-                format_money(entry.amount_cents),
-                entry.description
-            ));
+            self.save_with_success_or_restore(
+                format!(
+                    "Removed latest entry from {}: {} {}. Undo available.",
+                    wallet_name,
+                    format_money(entry.amount_cents),
+                    entry.description
+                ),
+                snapshot,
+            );
         } else {
             self.set_status_info("There are no entries to remove.");
         }
@@ -2140,6 +2162,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before undoing.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.confirm_delete_wallet = false;
 
         let Some(pending) = self.undo.take() else {
@@ -2156,12 +2179,15 @@ impl CofferlyApp {
                 wallet.entries.push(removable.entry.clone());
                 let wallet_name = wallet.child_name.clone();
                 self.invalidate_ledger_cache();
-                self.save_with_success(format!(
-                    "Restored entry for {}: {} {}.",
-                    wallet_name,
-                    format_money(removable.entry.amount_cents),
-                    removable.entry.description
-                ));
+                self.save_with_success_or_restore(
+                    format!(
+                        "Restored entry for {}: {} {}.",
+                        wallet_name,
+                        format_money(removable.entry.amount_cents),
+                        removable.entry.description
+                    ),
+                    snapshot,
+                );
             }
             PendingUndo::Edited(edited) => {
                 let Some(wallet) = self.data.wallets.get_mut(edited.wallet_index) else {
@@ -2176,12 +2202,15 @@ impl CofferlyApp {
                 *slot = edited.previous.clone();
                 let wallet_name = wallet.child_name.clone();
                 self.invalidate_ledger_cache();
-                self.save_with_success(format!(
-                    "Reverted correction for {}: {} {}.",
-                    wallet_name,
-                    format_money(edited.previous.amount_cents),
-                    edited.previous.description
-                ));
+                self.save_with_success_or_restore(
+                    format!(
+                        "Reverted correction for {}: {} {}.",
+                        wallet_name,
+                        format_money(edited.previous.amount_cents),
+                        edited.previous.description
+                    ),
+                    snapshot,
+                );
             }
         }
     }
@@ -2196,6 +2225,7 @@ impl CofferlyApp {
             return;
         }
 
+        let snapshot = self.snapshot_mutation();
         let wallet_name = self.selected_wallet().child_name.clone();
         let removed_index = self.selected_wallet;
         self.data.wallets.remove(removed_index);
@@ -2210,7 +2240,7 @@ impl CofferlyApp {
         // name/opening prefills so Save cannot overwrite the remaining kid.
         self.prefill_settings_from_selected();
         self.invalidate_ledger_cache();
-        self.save_with_success(format!("Deleted wallet for {wallet_name}."));
+        self.save_with_success_or_restore(format!("Deleted wallet for {wallet_name}."), snapshot);
     }
 
     fn print_selected_wallet(&mut self) {
@@ -2587,6 +2617,56 @@ impl CofferlyApp {
         match save_result {
             Ok(()) => self.set_status_ok(success_status),
             Err(err) => self.set_status_err(format!("Could not save: {err}")),
+        }
+    }
+
+    /// Snapshot of everything a settings/wallet/ledger mutation can touch
+    /// before it saves, so a failed vault write can put memory back to what
+    /// is on disk. `update_starting_balance` intentionally keeps its
+    /// in-memory value on failure and so does not use this helper.
+    fn snapshot_mutation(&self) -> MutationSnapshot {
+        MutationSnapshot {
+            data: self.data.clone(),
+            selected_wallet: self.selected_wallet,
+            ledger_filter: self.ledger_filter.clone(),
+            ledger_filters: self.ledger_filters.clone(),
+            undo: self.undo.clone(),
+            new_child_name_input: self.new_child_name_input.clone(),
+        }
+    }
+
+    /// Same save as `save_with_success`, but on failure restores the
+    /// pre-mutation snapshot so memory equals disk, then reports the error.
+    fn save_with_success_or_restore(
+        &mut self,
+        success_status: impl Into<String>,
+        snapshot: MutationSnapshot,
+    ) {
+        if !self.save_enabled {
+            self.set_status_err("Saved data could not be loaded, so changes are disabled.");
+            return;
+        }
+
+        let secret = if self.session.is_some() {
+            String::new()
+        } else {
+            self.data.parent_pin.clone()
+        };
+        match self.save_encrypted_data_and_refresh_ref(&secret) {
+            Ok(()) => self.set_status_ok(success_status),
+            Err(err) => {
+                self.data = snapshot.data;
+                self.selected_wallet = snapshot.selected_wallet;
+                self.ledger_filter = snapshot.ledger_filter;
+                self.ledger_filters = snapshot.ledger_filters;
+                self.undo = snapshot.undo;
+                self.new_child_name_input = snapshot.new_child_name_input;
+                // Re-derive the settings fields from the restored wallet so
+                // Save buttons stay off and the fields match the ledger again.
+                self.prefill_settings_from_selected();
+                self.invalidate_ledger_cache();
+                self.set_status_err(format!("Could not save: {err}"));
+            }
         }
     }
 
