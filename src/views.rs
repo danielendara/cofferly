@@ -1321,6 +1321,7 @@ impl CofferlyApp {
                 }
 
                 let editing = self.entry_edit.is_some();
+                let kind_before = self.draft.kind;
 
                 ui.label(
                     egui::RichText::new(if editing {
@@ -1467,6 +1468,14 @@ impl CofferlyApp {
                     })
                     .inner;
 
+                if desc_response.changed()
+                    || amount_response.changed()
+                    || date_response.changed()
+                    || self.draft.kind != kind_before
+                {
+                    self.remove_edited_confirm = None;
+                }
+
                 let enter_submit = enter_pressed
                     && (desc_response.lost_focus()
                         || amount_response.lost_focus()
@@ -1524,7 +1533,41 @@ impl CofferlyApp {
                         )
                         .clicked();
 
-                if cancel_clicked {
+                let remove_clicked = if editing {
+                    let (date, description) = self
+                        .entry_edit
+                        .as_ref()
+                        .map(|session| {
+                            (
+                                format_ledger_date(session.original.date),
+                                session.original.description.clone(),
+                            )
+                        })
+                        .unwrap_or_default();
+                    let confirming = self.remove_edited_confirm.is_some();
+                    let response = ui.add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::Button::new(
+                            egui::RichText::new(if confirming {
+                                "Remove this entry — confirm"
+                            } else {
+                                "Remove this entry"
+                            })
+                            .color(theme::NEGATIVE),
+                        ),
+                    );
+                    let name = format!("Remove entry {date}: {description}");
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone())
+                    });
+                    response.clicked()
+                } else {
+                    false
+                };
+
+                if remove_clicked {
+                    self.remove_edited_entry();
+                } else if cancel_clicked {
                     if editing {
                         self.cancel_entry_edit();
                     } else {

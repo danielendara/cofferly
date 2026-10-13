@@ -44,6 +44,7 @@ fn test_app() -> (CofferlyApp, TempDir) {
         confirm_negative_cents: None,
         undo: None,
         entry_edit: None,
+        remove_edited_confirm: None,
         pending_ledger_edit_focus: None,
         last_interaction: Instant::now(),
         unlocking: false,
@@ -3359,4 +3360,134 @@ fn savings_goal_write_failure_restores_goal() {
     assert!(app.selected_wallet().savings_goal_cents.is_none());
     assert_eq!(data_snapshot(&app), before_data);
     assert_eq!(app.raw_bytes, before_raw);
+}
+
+// --- remove any entry from the correction form ----------------------------------
+
+#[test]
+fn remove_edited_entry_needs_two_clicks_and_removes_a_middle_entry() {
+    let (mut app, _dir) = app_with_entries();
+    let before = app.selected_wallet().entries.clone();
+    app.draft.description = "Half-typed".to_owned();
+
+    app.begin_entry_edit(1);
+    app.remove_edited_entry();
+    assert_eq!(
+        app.selected_wallet().entries,
+        before,
+        "first click removes nothing"
+    );
+    assert_eq!(app.remove_edited_confirm, Some(1));
+    assert!(app.status.text.contains("bkie repair"));
+
+    app.remove_edited_entry();
+    let after = &app.selected_wallet().entries;
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[0], before[0]);
+    assert_eq!(after[1], before[2]);
+    assert!(app.entry_edit.is_none());
+    assert!(app.remove_edited_confirm.is_none());
+    assert_eq!(app.draft.description, "Half-typed", "add-draft restored");
+    assert!(app.status.text.ends_with("Undo available."));
+
+    app.undo_remove_entry();
+    assert_eq!(
+        app.selected_wallet().entries,
+        before,
+        "undo restores original order"
+    );
+}
+
+#[test]
+fn remove_edited_entry_warns_when_a_later_balance_goes_negative() {
+    let (mut app, _dir) = app_with_entries();
+    // Entry 0 (+10.00) is what keeps the later -125.00 bike repair above zero.
+    app.selected_wallet_mut().starting_balance_cents = 12_000;
+    app.begin_entry_edit(0);
+    app.remove_edited_entry();
+    assert!(app.status.text.contains("below zero later in the ledger"));
+    app.remove_edited_entry();
+    assert_eq!(
+        app.selected_wallet().entries.len(),
+        2,
+        "still removes on confirm"
+    );
+}
+
+#[test]
+fn remove_edited_confirmation_is_dropped_by_cancel_wallet_switch_and_lock() {
+    let (mut app, _dir) = app_with_entries();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(1);
+    app.remove_edited_entry();
+    app.cancel_entry_edit();
+    assert!(app.remove_edited_confirm.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+
+    app.data.wallets.push(Wallet {
+        child_name: "Test Kid".to_owned(),
+        ..app.data.wallets[0].clone()
+    });
+    app.begin_entry_edit(1);
+    app.remove_edited_entry();
+    app.select_wallet(1);
+    assert!(app.remove_edited_confirm.is_none());
+    app.select_wallet(0);
+    app.remove_edited_entry();
+    assert_eq!(
+        app.data.wallets[0].entries, before,
+        "stale session removes nothing"
+    );
+}
+
+#[test]
+fn lock_while_remove_confirm_is_pending_removes_nothing_and_drops_undo() {
+    let (mut app, _dir) = app_with_entries();
+    let before = app.selected_wallet().entries.clone();
+    app.undo = Some(PendingUndo::Removed(RemovableEntry {
+        wallet_index: 0,
+        entry: before[0].clone(),
+        entry_index: None,
+    }));
+
+    app.begin_entry_edit(1);
+    app.remove_edited_entry();
+    assert_eq!(app.remove_edited_confirm, Some(1));
+
+    app.lock_parent();
+    assert!(app.remove_edited_confirm.is_none());
+    assert!(app.entry_edit.is_none());
+    assert!(app.undo.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+
+    // A confirm click after locking is refused.
+    app.remove_edited_entry();
+    assert_eq!(app.selected_wallet().entries, before);
+}
+
+#[test]
+fn remove_edited_entry_write_failure_restores_ledger_session_draft_and_undo() {
+    let (mut app, dir) = app_with_entries();
+    app.remove_latest_entry();
+    app.undo_remove_entry();
+    app.remove_latest_entry();
+    let previous_undo = app.undo.clone();
+    let before = app.selected_wallet().entries.clone();
+    app.draft.description = "Half-typed".to_owned();
+    app.begin_entry_edit(0);
+    app.remove_edited_entry();
+    app.data_path = unwritable_data_path(&dir);
+
+    app.remove_edited_entry();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert_eq!(app.selected_wallet().entries, before);
+    assert_eq!(app.entry_edit.as_ref().map(|s| s.entry_index), Some(0));
+    assert_eq!(app.draft.description, "Weekly allowance");
+    assert_eq!(
+        format!("{:?}", app.undo),
+        format!("{previous_undo:?}"),
+        "previous undo kept"
+    );
 }

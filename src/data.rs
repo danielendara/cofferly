@@ -322,6 +322,25 @@ impl Wallet {
         false
     }
 
+    /// Would removing entry `entry_index` leave the balance below zero at any
+    /// later point in date order? Mirrors `goes_negative_with`; an index past
+    /// the end changes nothing.
+    pub fn goes_negative_without(&self, entry_index: usize) -> bool {
+        let mut balance = self.starting_balance_cents;
+        let mut reached = false;
+        for index in self.chronological_entry_indices() {
+            if index == entry_index {
+                reached = true;
+                continue;
+            }
+            balance = balance.saturating_add(self.entries[index].amount_cents);
+            if reached && balance < 0 {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn balances_are_valid(&self) -> bool {
         let goal_ok = match self.savings_goal_cents {
             None => true,
@@ -838,6 +857,26 @@ mod tests {
         // A money-out correction moved earlier takes an earlier point below zero.
         assert!(wallet.goes_negative_with(0, jul(1), -100));
         assert!(!wallet.goes_negative_with(0, jul(10), 1000));
+    }
+
+    #[test]
+    fn goes_negative_without_checks_every_later_balance() {
+        let jul = |day| NaiveDate::from_ymd_opt(2026, 7, day).unwrap();
+        let entry = |day, cents| Entry {
+            date: jul(day),
+            description: "Test".to_owned(),
+            amount_cents: cents,
+        };
+        let mut wallet = backdated_wallet();
+        wallet.entries = vec![entry(1, 1000), entry(5, -500), entry(20, 200)];
+
+        // Dropping the +10.00 deposit leaves the later -5.00 below zero.
+        assert!(wallet.goes_negative_without(0));
+        // Dropping a deduction or the last entry only helps or changes nothing.
+        assert!(!wallet.goes_negative_without(1));
+        assert!(!wallet.goes_negative_without(2));
+        // An index past the end removes nothing.
+        assert!(!wallet.goes_negative_without(99));
     }
 
     #[test]
