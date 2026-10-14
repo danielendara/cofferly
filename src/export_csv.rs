@@ -204,42 +204,7 @@ mod tests {
     fn filtered_csv_keeps_start_row_full_balance_and_oldest_first_order() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.csv");
-        let wallets = vec![
-            Wallet {
-                child_name: "Child 1".to_owned(),
-                starting_balance_cents: 1_000,
-                entries: vec![
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
-                        description: "Snack early".to_owned(),
-                        amount_cents: -200,
-                    },
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
-                        description: "Weekly allowance".to_owned(),
-                        amount_cents: 1_000,
-                    },
-                    Entry {
-                        date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
-                        description: "Snack late".to_owned(),
-                        amount_cents: -100,
-                    },
-                ],
-                weekly_allowance: None,
-                savings_goal_cents: None,
-            },
-            Wallet {
-                child_name: "Child 2".to_owned(),
-                starting_balance_cents: 0,
-                entries: vec![Entry {
-                    date: NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(),
-                    description: "Bus fare".to_owned(),
-                    amount_cents: -300,
-                }],
-                weekly_allowance: None,
-                savings_goal_cents: None,
-            },
-        ];
+        let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
         let csv = std::fs::read_to_string(
             write_csv_ledger_filtered(&path, &wallets[..1], "SNACK").unwrap(),
