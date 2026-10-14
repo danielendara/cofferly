@@ -103,6 +103,9 @@ impl EntryDraft {
 struct RemovableEntry {
     wallet_index: usize,
     entry: Entry,
+    /// Where the entry sat before removal, so undo can put it back in place.
+    /// `None` appends (the newest-entry removal).
+    entry_index: Option<usize>,
 }
 
 /// The entry most recently corrected in place, held briefly so the user can put
@@ -311,6 +314,8 @@ pub(crate) struct CofferlyApp {
     confirm_negative_cents: Option<i64>,
     undo: Option<PendingUndo>,
     entry_edit: Option<EntryEditSession>,
+    /// Entry index of the open correction whose removal awaits a second click.
+    remove_edited_confirm: Option<usize>,
     pending_ledger_edit_focus: Option<usize>,
     last_interaction: Instant,
     /// True while Argon2id / decrypt runs off the UI thread.
@@ -544,6 +549,7 @@ impl CofferlyApp {
             confirm_negative_cents: None,
             undo: None,
             entry_edit: None,
+            remove_edited_confirm: None,
             pending_ledger_edit_focus: None,
             last_interaction: Instant::now(),
             unlocking: false,
@@ -615,6 +621,7 @@ impl CofferlyApp {
         }
         self.confirm_delete_wallet = false;
         self.confirm_negative_cents = None;
+        self.remove_edited_confirm = None;
         self.undo = None;
         self.invalidate_ledger_cache();
     }
@@ -1015,6 +1022,7 @@ impl CofferlyApp {
         self.confirm_delete_wallet = false;
         self.pending_backup_overwrite = None;
         self.confirm_negative_cents = None;
+        self.remove_edited_confirm = None;
         if let Some(session) = self.entry_edit.take() {
             self.draft = session.stashed_draft;
         }
@@ -1654,8 +1662,92 @@ impl CofferlyApp {
         };
         self.draft = session.stashed_draft;
         self.confirm_negative_cents = None;
+        self.remove_edited_confirm = None;
         self.pending_ledger_edit_focus = Some(session.entry_index);
         self.set_status_info("Correction cancelled.");
+    }
+
+    /// Removes the entry being corrected, wherever it sits in the ledger. The
+    /// first call arms a confirmation; the second removes. A failed vault write
+    /// restores the ledger, the correction session, the form and the old undo.
+    fn remove_edited_entry(&mut self) {
+        if !self.can_change("Unlock parent mode before removing entries.") {
+            return;
+        }
+        let Some(session) = self.entry_edit.clone() else {
+            return;
+        };
+        if session.wallet_index != self.selected_wallet {
+            self.cancel_entry_edit();
+            return;
+        }
+        let Some(entry) = self
+            .selected_wallet()
+            .entries
+            .get(session.entry_index)
+            .cloned()
+        else {
+            self.entry_edit = None;
+            self.remove_edited_confirm = None;
+            self.draft = session.stashed_draft;
+            self.set_status_err("That entry is no longer in the ledger.");
+            return;
+        };
+        let wallet_name = self.selected_wallet().child_name.clone();
+
+        if self.remove_edited_confirm != Some(session.entry_index) {
+            self.remove_edited_confirm = Some(session.entry_index);
+            let mut text = format!(
+                "Remove {} · {} · {}? Click confirm to remove it.",
+                format_ledger_date(entry.date),
+                entry.description,
+                format_money(entry.amount_cents),
+            );
+            if self
+                .selected_wallet()
+                .goes_negative_without(session.entry_index)
+            {
+                text.push_str(&format!(
+                    " Removing it would leave {wallet_name} below zero later in the ledger."
+                ));
+            }
+            self.set_status_info(text);
+            return;
+        }
+        self.remove_edited_confirm = None;
+
+        let snapshot = self.snapshot_mutation();
+        let edit_snapshot = (self.entry_edit.clone(), self.draft.clone());
+        self.confirm_delete_wallet = false;
+        self.confirm_negative_cents = None;
+
+        self.selected_wallet_mut()
+            .entries
+            .remove(session.entry_index);
+        self.undo = Some(PendingUndo::Removed(RemovableEntry {
+            wallet_index: session.wallet_index,
+            entry: entry.clone(),
+            entry_index: Some(session.entry_index),
+        }));
+        self.entry_edit = None;
+        self.draft = session.stashed_draft;
+        self.invalidate_ledger_cache();
+        self.pending_ledger_edit_focus = None;
+        self.pending_entry_focus = Some(EntryFormField::Description);
+        self.save_with_success_or_restore(
+            format!(
+                "Removed entry from {}: {} {}. Undo available.",
+                wallet_name,
+                format_money(entry.amount_cents),
+                entry.description
+            ),
+            snapshot,
+        );
+        if matches!(self.status.severity, StatusSeverity::Error) {
+            // Save failed: snapshot restored ledger and undo; put the form back.
+            self.entry_edit = edit_snapshot.0;
+            self.draft = edit_snapshot.1;
+        }
     }
 
     /// Would this candidate entry drive the running balance negative *at its own
@@ -1789,6 +1881,7 @@ impl CofferlyApp {
     }
 
     fn fill_entry_date_today(&mut self) {
+        self.remove_edited_confirm = None;
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
         self.pending_entry_focus = Some(EntryFormField::Date);
     }
@@ -2140,6 +2233,7 @@ impl CofferlyApp {
             self.undo = Some(PendingUndo::Removed(RemovableEntry {
                 wallet_index: self.selected_wallet,
                 entry: entry.clone(),
+                entry_index: None,
             }));
             self.invalidate_ledger_cache();
             self.save_with_success_or_restore(
@@ -2176,7 +2270,13 @@ impl CofferlyApp {
                     return;
                 };
 
-                wallet.entries.push(removable.entry.clone());
+                match removable.entry_index {
+                    Some(at) => {
+                        let at = at.min(wallet.entries.len());
+                        wallet.entries.insert(at, removable.entry.clone());
+                    }
+                    None => wallet.entries.push(removable.entry.clone()),
+                }
                 let wallet_name = wallet.child_name.clone();
                 self.invalidate_ledger_cache();
                 self.save_with_success_or_restore(
