@@ -496,17 +496,9 @@ impl CofferlyApp {
         } else {
             data.wallets.len()
         };
-        let (
-            selected_wallet,
-            ledger_sort,
-            pending_wallet_selection_name,
-            last_entry_kind,
-            ledger_filter,
-            ledger_filters,
-            last_backup,
-        ) = restore_ui_state(cc, restore_wallet_bound);
+        let restored = restore_ui_state(cc.storage, restore_wallet_bound);
         let mut draft = EntryDraft::new();
-        draft.kind = last_entry_kind;
+        draft.kind = restored.entry_kind;
         let (lock_screen_image, lock_screen_bg) = load_lock_screen_image(&cc.egui_ctx);
         let open_coffer_image = load_open_coffer_image(&cc.egui_ctx);
         let story_icon_textures = load_story_icon_textures(&cc.egui_ctx);
@@ -515,11 +507,11 @@ impl CofferlyApp {
             data,
             raw_bytes,
             session: None,
-            selected_wallet,
-            ledger_sort,
+            selected_wallet: restored.wallet_index,
+            ledger_sort: restored.ledger_sort,
             ledger_cache: None,
-            ledger_filter,
-            ledger_filters,
+            ledger_filter: restored.ledger_filter,
+            ledger_filters: restored.ledger_filters,
             pending_ledger_filter_focus: false,
             draft,
             starting_balance_input: String::new(),
@@ -559,8 +551,8 @@ impl CofferlyApp {
             capture: capture::CaptureSession::from_env(),
             capturing: std::env::var_os("COFFERLY_CAPTURE").is_some(),
             temp_artifact_paths: Vec::new(),
-            pending_wallet_selection_name,
-            last_backup,
+            pending_wallet_selection_name: restored.wallet_name,
+            last_backup: restored.last_backup_date,
             pending_backup_overwrite: None,
             restore: None,
         }
@@ -3194,64 +3186,63 @@ fn filtered_export_opened_status(
     )
 }
 
-/// Wallet index, sort, wallet name, entry kind, ledger filter, per-child
-/// filters, and last backup date, in that order.
-type RestoredUiState = (
-    usize,
-    LedgerSort,
-    Option<String>,
-    EntryKind,
-    String,
-    HashMap<String, String>,
-    Option<String>,
-);
+/// UI prefs restored from eframe storage at startup.
+#[derive(Debug, PartialEq)]
+struct RestoredUiState {
+    /// The eagerly-clamped index (a placeholder only good enough for the
+    /// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`).
+    wallet_index: usize,
+    ledger_sort: LedgerSort,
+    /// The persisted wallet name (if any), which `apply_unlock` resolves
+    /// against the real wallet list once it's known.
+    wallet_name: Option<String>,
+    /// The last-selected Money in/out kind.
+    entry_kind: EntryKind,
+    /// The selected kid's ledger description filter.
+    ledger_filter: String,
+    /// The per-child filter map (applied directly -- unlike the wallet name,
+    /// the filters need no real data to resolve against).
+    ledger_filters: HashMap<String, String>,
+    last_backup_date: Option<String>,
+}
 
-/// Returns the eagerly-clamped index (a placeholder only good enough for the
-/// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`),
-/// the persisted ledger sort, the persisted wallet name (if any, which
-/// `apply_unlock` resolves against the real wallet list once it's known),
-/// the last-selected Money in/out kind, the selected kid's ledger description
-/// filter, and the per-child filter map (applied directly -- unlike the wallet
-/// name, they need no real data to resolve against).
-fn restore_ui_state(cc: &eframe::CreationContext<'_>, wallet_count: usize) -> RestoredUiState {
+impl Default for RestoredUiState {
+    fn default() -> Self {
+        Self {
+            wallet_index: 0,
+            ledger_sort: LedgerSort::NewestFirst,
+            wallet_name: None,
+            entry_kind: EntryKind::default(),
+            ledger_filter: String::new(),
+            ledger_filters: HashMap::new(),
+            last_backup_date: None,
+        }
+    }
+}
+
+fn restore_ui_state(storage: Option<&dyn eframe::Storage>, wallet_count: usize) -> RestoredUiState {
     let wallet_count = wallet_count.max(1);
-    let Some(storage) = cc.storage else {
-        return (
-            0,
-            LedgerSort::NewestFirst,
-            None,
-            EntryKind::default(),
-            String::new(),
-            HashMap::new(),
-            None,
-        );
+    let Some(storage) = storage else {
+        return RestoredUiState::default();
     };
     let Some(state) = eframe::get_value::<UiState>(storage, UI_STATE_KEY) else {
-        return (
-            0,
-            LedgerSort::NewestFirst,
-            None,
-            EntryKind::default(),
-            String::new(),
-            HashMap::new(),
-            None,
-        );
+        return RestoredUiState::default();
     };
-    let selected = state.selected_wallet.min(wallet_count.saturating_sub(1));
-    let sort = if state.ledger_sort_newest_first {
+    let wallet_index = state.selected_wallet.min(wallet_count.saturating_sub(1));
+    let ledger_sort = if state.ledger_sort_newest_first {
         LedgerSort::NewestFirst
     } else {
         LedgerSort::OldestFirst
     };
-    (
-        selected,
-        sort,
-        state.selected_wallet_name,
-        state.last_entry_kind,
-        restore_ledger_filter(state.ledger_filter),
-        restore_ledger_filters(state.ledger_filters),
-        state.last_backup,
-    )
+    RestoredUiState {
+        wallet_index,
+        ledger_sort,
+        wallet_name: state.selected_wallet_name,
+        entry_kind: state.last_entry_kind,
+        ledger_filter: restore_ledger_filter(state.ledger_filter),
+        ledger_filters: restore_ledger_filters(state.ledger_filters),
+        last_backup_date: state.last_backup,
+    }
 }
 
 const LEDGER_FILTER_RESTORE_MAX_CHARS: usize = 80;
