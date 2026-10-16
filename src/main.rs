@@ -162,6 +162,16 @@ struct MutationSnapshot {
     new_child_name_input: String,
 }
 
+/// The secret a vault write encrypts with: an established session already holds
+/// the data key, so only a fresh vault needs the parent PIN.
+fn save_secret_for(session: &Option<SessionCrypto>, data: &AppData) -> String {
+    if session.is_some() {
+        String::new()
+    } else {
+        data.parent_pin.clone()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusSeverity {
     Info,
@@ -912,11 +922,7 @@ impl CofferlyApp {
 
         let mut parts = Vec::new();
         if !posted.is_empty() {
-            let secret = if self.session.is_some() {
-                String::new()
-            } else {
-                next.parent_pin.clone()
-            };
+            let secret = save_secret_for(&self.session, &next);
             match save_encrypted(&self.data_path, &next, &secret, &mut self.session) {
                 Ok(encrypted) => {
                     self.raw_bytes = Some(encrypted);
@@ -1527,6 +1533,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before adding entries.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -1582,20 +1589,10 @@ impl CofferlyApp {
             wallet_name
         );
 
-        let secret = if self.session.is_some() {
-            String::new()
-        } else {
-            self.data.parent_pin.clone()
-        };
-        if let Err(err) = self.save_encrypted_data_and_refresh_ref(&secret) {
-            // Roll the entry back and keep the draft so Enter retries it — an
-            // unsaved entry must not survive in memory as if it had been written.
-            self.selected_wallet_mut().entries.pop();
-            self.invalidate_ledger_cache();
+        // On failure the snapshot rolls the entry (and the old undo) back; keep
+        // the draft so Enter retries it.
+        if !self.persist_or_restore(status, snapshot, ". The entry was not recorded.") {
             self.pending_entry_focus = Some(EntryFormField::Description);
-            self.set_status_err(format!(
-                "Could not save: {err}. The entry was not recorded."
-            ));
             return;
         }
 
@@ -1607,7 +1604,6 @@ impl CofferlyApp {
         // focus happened to be.
         self.pending_entry_focus = Some(EntryFormField::Description);
         self.invalidate_ledger_cache();
-        self.set_status_ok(status);
     }
 
     /// Opens a correction for one entry: the add form is stashed and reloaded
@@ -1727,7 +1723,7 @@ impl CofferlyApp {
         self.invalidate_ledger_cache();
         self.pending_ledger_edit_focus = None;
         self.pending_entry_focus = Some(EntryFormField::Description);
-        self.save_with_success_or_restore(
+        let saved = self.persist_or_restore(
             format!(
                 "Removed entry from {}: {} {}. Undo available.",
                 wallet_name,
@@ -1735,8 +1731,9 @@ impl CofferlyApp {
                 entry.description
             ),
             snapshot,
+            "",
         );
-        if matches!(self.status.severity, StatusSeverity::Error) {
+        if !saved {
             // Save failed: snapshot restored ledger and undo; put the form back.
             self.entry_edit = edit_snapshot.0;
             self.draft = edit_snapshot.1;
@@ -1798,6 +1795,7 @@ impl CofferlyApp {
         }
         self.confirm_negative_cents = None;
 
+        let snapshot = self.snapshot_mutation();
         let previous = session.original.clone();
         let wallet_name = self.selected_wallet().child_name.clone();
         let updated = Entry {
@@ -1826,33 +1824,28 @@ impl CofferlyApp {
 
         self.invalidate_ledger_cache();
 
-        let secret = if self.session.is_some() {
-            String::new()
-        } else {
-            self.data.parent_pin.clone()
-        };
-        if let Err(err) = self.save_encrypted_data_and_refresh_ref(&secret) {
-            // Roll the ledger back to disk's version — an unsaved correction
-            // must not survive in memory as if it had been written.
-            self.selected_wallet_mut().entries[session.entry_index] = previous;
-            self.invalidate_ledger_cache();
-            self.set_status_err(format!("Could not save: {err}"));
-            return;
-        }
-
+        // The undo is set before the save so a failed write restores the old one
+        // from the snapshot; the correction session stays open for a retry.
         self.undo = Some(PendingUndo::Edited(EditedEntry {
             wallet_index: session.wallet_index,
             entry_index: session.entry_index,
             previous,
         }));
+        let saved = self.persist_or_restore(
+            format!(
+                "Corrected entry for {wallet_name}: {} {}. Undo available.",
+                format_money(input.signed_amount),
+                input.description
+            ),
+            snapshot,
+            "",
+        );
+        if !saved {
+            return;
+        }
         self.entry_edit = None;
         self.draft = session.stashed_draft;
         self.pending_ledger_edit_focus = Some(session.entry_index);
-        self.set_status_ok(format!(
-            "Corrected entry for {wallet_name}: {} {}. Undo available.",
-            format_money(input.signed_amount),
-            input.description
-        ));
     }
 
     /// Wallet index and amount the pending undo would restore, for the button label.
@@ -1934,6 +1927,7 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before changing balances.") {
             return;
         }
+        let snapshot = self.snapshot_mutation();
         self.undo = None;
         self.confirm_delete_wallet = false;
 
@@ -1963,11 +1957,14 @@ impl CofferlyApp {
         let wallet_name = self.selected_wallet().child_name.clone();
         self.starting_balance_input.clear();
         self.invalidate_ledger_cache();
-        self.save_with_success(format!(
-            "Updated {} starting balance to {}.",
-            wallet_name,
-            format_money(balance)
-        ));
+        self.save_with_success_or_restore(
+            format!(
+                "Updated {} starting balance to {}.",
+                wallet_name,
+                format_money(balance)
+            ),
+            snapshot,
+        );
     }
 
     fn weekly_allowance_save_ready(&self) -> bool {
@@ -2549,31 +2546,9 @@ impl CofferlyApp {
         }
     }
 
-    fn save_with_success(&mut self, success_status: impl Into<String>) {
-        if !self.save_enabled {
-            self.set_status_err("Saved data could not be loaded, so changes are disabled.");
-            return;
-        }
-
-        // Serialize from &self.data without an extra full clone of the tree for the
-        // save path: we still need pin ownership, so clone only the pin string.
-        let secret = if self.session.is_some() {
-            String::new()
-        } else {
-            self.data.parent_pin.clone()
-        };
-        let save_result = self.save_encrypted_data_and_refresh_ref(&secret);
-
-        match save_result {
-            Ok(()) => self.set_status_ok(success_status),
-            Err(err) => self.set_status_err(format!("Could not save: {err}")),
-        }
-    }
-
     /// Snapshot of everything a settings/wallet/ledger mutation can touch
     /// before it saves, so a failed vault write can put memory back to what
-    /// is on disk. `update_starting_balance` intentionally keeps its
-    /// in-memory value on failure and so does not use this helper.
+    /// is on disk.
     fn snapshot_mutation(&self) -> MutationSnapshot {
         MutationSnapshot {
             data: self.data.clone(),
@@ -2585,39 +2560,48 @@ impl CofferlyApp {
         }
     }
 
-    /// Same save as `save_with_success`, but on failure restores the
-    /// pre-mutation snapshot so memory equals disk, then reports the error.
+    /// Saves the vault; on success reports `success_status`. On every failure
+    /// (changes disabled or a failed write) restores the pre-mutation snapshot
+    /// so memory equals disk, then reports the error followed by `error_suffix`.
+    /// Returns whether the save succeeded.
+    fn persist_or_restore(
+        &mut self,
+        success_status: impl Into<String>,
+        snapshot: MutationSnapshot,
+        error_suffix: &str,
+    ) -> bool {
+        let failure = if self.save_enabled {
+            let secret = save_secret_for(&self.session, &self.data);
+            match self.save_encrypted_data_and_refresh_ref(&secret) {
+                Ok(()) => {
+                    self.set_status_ok(success_status);
+                    return true;
+                }
+                Err(err) => format!("Could not save: {err}{error_suffix}"),
+            }
+        } else {
+            "Saved data could not be loaded, so changes are disabled.".to_owned()
+        };
+        self.data = snapshot.data;
+        self.selected_wallet = snapshot.selected_wallet;
+        self.ledger_filter = snapshot.ledger_filter;
+        self.ledger_filters = snapshot.ledger_filters;
+        self.undo = snapshot.undo;
+        self.new_child_name_input = snapshot.new_child_name_input;
+        // Re-derive the settings fields from the restored wallet so
+        // Save buttons stay off and the fields match the ledger again.
+        self.prefill_settings_from_selected();
+        self.invalidate_ledger_cache();
+        self.set_status_err(failure);
+        false
+    }
+
     fn save_with_success_or_restore(
         &mut self,
         success_status: impl Into<String>,
         snapshot: MutationSnapshot,
     ) {
-        if !self.save_enabled {
-            self.set_status_err("Saved data could not be loaded, so changes are disabled.");
-            return;
-        }
-
-        let secret = if self.session.is_some() {
-            String::new()
-        } else {
-            self.data.parent_pin.clone()
-        };
-        match self.save_encrypted_data_and_refresh_ref(&secret) {
-            Ok(()) => self.set_status_ok(success_status),
-            Err(err) => {
-                self.data = snapshot.data;
-                self.selected_wallet = snapshot.selected_wallet;
-                self.ledger_filter = snapshot.ledger_filter;
-                self.ledger_filters = snapshot.ledger_filters;
-                self.undo = snapshot.undo;
-                self.new_child_name_input = snapshot.new_child_name_input;
-                // Re-derive the settings fields from the restored wallet so
-                // Save buttons stay off and the fields match the ledger again.
-                self.prefill_settings_from_selected();
-                self.invalidate_ledger_cache();
-                self.set_status_err(format!("Could not save: {err}"));
-            }
-        }
+        self.persist_or_restore(success_status, snapshot, "");
     }
 
     fn save_encrypted_data_and_refresh_ref(&mut self, pin: &str) -> Result<(), String> {

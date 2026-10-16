@@ -1879,6 +1879,24 @@ fn add_entry_write_failure_rolls_back_and_keeps_the_draft() {
     assert!(!app.data_path.exists());
 }
 
+#[test]
+fn add_entry_write_failure_keeps_the_earlier_pending_undo() {
+    let (mut app, dir) = app_with_entries();
+    app.remove_latest_entry();
+    assert!(app.undo.is_some());
+    app.data_path = unwritable_data_path(&dir);
+    app.draft.kind = EntryKind::Deposit;
+    app.draft.description = "Birthday".to_owned();
+    app.draft.amount = "$5.00".to_owned();
+    let before_entries = app.selected_wallet().entries.clone();
+
+    app.add_entry();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert_eq!(app.selected_wallet().entries, before_entries);
+    assert!(app.undo.is_some(), "failed add must keep the pending undo");
+}
+
 #[cfg(unix)]
 #[test]
 fn add_entry_write_failure_leaves_existing_vault_bytes_unchanged() {
@@ -2810,7 +2828,7 @@ fn updating_starting_balance_shifts_the_running_total_without_touching_entries()
 }
 
 #[test]
-fn starting_balance_write_failure_keeps_memory_and_reports_status_error() {
+fn starting_balance_write_failure_restores_memory_and_reports_status_error() {
     let (mut app, dir) = test_app();
     app.data_path = unwritable_data_path(&dir);
     app.starting_balance_input = "20.00".to_owned();
@@ -2819,8 +2837,8 @@ fn starting_balance_write_failure_keeps_memory_and_reports_status_error() {
 
     assert_eq!(app.status.severity, StatusSeverity::Error);
     assert!(app.status.text.starts_with("Could not save:"));
-    assert_eq!(app.selected_wallet().starting_balance_cents, 2_000);
-    assert!(app.starting_balance_input.is_empty());
+    assert_eq!(app.selected_wallet().starting_balance_cents, 0);
+    assert_eq!(app.starting_balance_input, format_money_input(0));
     assert!(app.raw_bytes.is_none());
     assert!(!app.data_path.exists());
 }
@@ -3199,9 +3217,7 @@ mod savings_goal {
 //
 // Each mutation below snapshots `AppData` (+ selection/undo/filter state)
 // before saving; a failed vault write must leave memory equal to what is on
-// disk and surface a status error. `update_starting_balance` intentionally
-// keeps its in-memory value and is covered by
-// `starting_balance_write_failure_keeps_memory_and_reports_status_error`.
+// disk and surface a status error.
 
 fn data_snapshot(app: &CofferlyApp) -> String {
     serde_json::to_string(&app.data).expect("test snapshot serializes")
