@@ -3491,3 +3491,58 @@ fn remove_edited_entry_write_failure_restores_ledger_session_draft_and_undo() {
         "previous undo kept"
     );
 }
+
+#[test]
+fn restore_ui_state_without_storage_or_saved_state_uses_defaults() {
+    assert_eq!(restore_ui_state(None, 3), RestoredUiState::default());
+
+    let empty = FakeStorage::default();
+    assert_eq!(
+        restore_ui_state(Some(&empty), 3),
+        RestoredUiState::default()
+    );
+
+    let defaults = RestoredUiState::default();
+    assert_eq!(defaults.wallet_index, 0);
+    assert_eq!(defaults.ledger_sort, LedgerSort::NewestFirst);
+    assert_eq!(defaults.wallet_name, None);
+    assert_eq!(defaults.entry_kind, EntryKind::Deduction);
+    assert!(defaults.ledger_filter.is_empty());
+    assert!(defaults.ledger_filters.is_empty());
+    assert_eq!(defaults.last_backup_date, None);
+}
+
+#[test]
+fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
+    let mut storage = FakeStorage::default();
+    eframe::set_value(
+        &mut storage,
+        UI_STATE_KEY,
+        &UiState {
+            selected_wallet: 7,
+            ledger_sort_newest_first: false,
+            selected_wallet_name: Some("Child B".to_owned()),
+            last_entry_kind: EntryKind::Deposit,
+            ledger_filter: "Snack".to_owned(),
+            ledger_filters: HashMap::from([("Child B".to_owned(), "Snack".to_owned())]),
+            last_backup: Some("2026-01-02".to_owned()),
+        },
+    );
+
+    let restored = restore_ui_state(Some(&storage), 3);
+
+    assert_eq!(restored.wallet_index, 2, "clamped to wallet_count - 1");
+    assert_eq!(restored.ledger_sort, LedgerSort::OldestFirst);
+    assert_eq!(restored.wallet_name.as_deref(), Some("Child B"));
+    assert_eq!(restored.entry_kind, EntryKind::Deposit);
+    assert_eq!(restored.ledger_filter, "Snack");
+    assert_eq!(
+        restored.ledger_filters,
+        HashMap::from([("Child B".to_owned(), "Snack".to_owned())])
+    );
+    assert_eq!(restored.last_backup_date.as_deref(), Some("2026-01-02"));
+
+    // An index within range is kept, and a zero wallet count still yields 0.
+    assert_eq!(restore_ui_state(Some(&storage), 9).wallet_index, 7);
+    assert_eq!(restore_ui_state(Some(&storage), 0).wallet_index, 0);
+}
