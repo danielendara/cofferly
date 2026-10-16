@@ -7,10 +7,11 @@ Cofferly: local-only allowance wallet for kids. Rust + eframe/egui desktop app, 
 - Lint: `cargo clippy --all-targets --locked -- -D warnings`
 - Typecheck: `cargo check --all-targets --locked`
 - Unit tests: `cargo test --locked`
+- Docs self-check: `scripts/check-docs.sh`
 - Coverage gate: `cargo llvm-cov --locked --fail-under-lines 74 --ignore-filename-regex '(^|/)src/(views|capture)\.rs$'`
 - Vault guard: `scripts/check-vault-paths.sh`
 - E2E: none exist; the GUI smoke is the app's capture mode (`COFFERLY_CAPTURE`) under `xvfb-run`, wired into verify.
-- **Verify entrypoint (run before every PR): `scripts/verify.sh`** (CI is local-only; GitHub Actions is down). Runs all of the above fail-fast.
+- **Verify entrypoint (run before every PR): `scripts/verify.sh`** Runs all of the above fail-fast, plus a docs self-check and the GUI smoke. GitHub Actions CI (`.github/workflows/ci.yml`) is live on this public repo; it must also be green on the PR.
 - Drive the real app: see `.cursor/skills/verify-cofferly/SKILL.md`.
 
 ## Proof required in PRs

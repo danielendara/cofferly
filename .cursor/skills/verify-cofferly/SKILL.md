@@ -5,17 +5,21 @@ description: Launch and drive the Cofferly desktop app (Rust/egui, encrypted loc
 
 # verify-cofferly
 
-Surface: native desktop GUI (eframe/egui, wgpu). No server, no ports, no network. Data lives in `$COFFERLY_DATA_DIR/Cofferly/`. CI is local-only: the gate is `scripts/verify.sh`.
+Surface: native desktop GUI (eframe/egui, wgpu). No server, no ports, no network. Data lives in `$COFFERLY_DATA_DIR/Cofferly/`. GitHub Actions CI (`.github/workflows/ci.yml`) is live; run `scripts/verify.sh` locally before every PR and make sure CI is green too.
 
 ## Full gate
-`scripts/verify.sh` — vault guard, fmt, clippy, check, tests, coverage (>=74%), GUI smoke. Fails fast. Needs `cargo-llvm-cov`, `xvfb-run`. If `cargo` has no default toolchain: `export RUSTUP_TOOLCHAIN=<installed toolchain>`.
+`scripts/verify.sh` — vault guard, docs self-check, fmt, clippy, check, tests, coverage (>=74%), GUI smoke. Fails fast. Needs `cargo-llvm-cov`, `xvfb-run`. If `cargo` has no default toolchain: `export RUSTUP_TOOLCHAIN=<installed toolchain>`.
 
 ## Launch
 ```bash
+EVID=${EVID:-/workspace/verify-$(date +%F)/cofferly-evidence}; mkdir -p "$EVID"
 cargo build --release --locked            # -> target/release/Cofferly
 D=$(mktemp -d)                            # empty data dir = first-run Coffer Story setup, no seed needed
-xvfb-run -a -s "-screen 0 1280x800x24" bash -c \
-  "COFFERLY_DATA_DIR=$D target/release/Cofferly 2>$EVID/live-stderr.log & P=\$!; sleep 12; import -window root $EVID/live-first-launch.png; kill \$P"
+# setsid makes the launcher its own process group leader: PGID == its PID, so cleanup is `kill -- -PGID`.
+COFFERLY_DATA_DIR=$D setsid xvfb-run -a -s "-screen 0 1280x800x24" bash -c \
+  "target/release/Cofferly 2>$EVID/live-stderr.log & sleep 12; import -window root $EVID/live-first-launch.png; wait" &
+PGID=$!; echo "PGID=$PGID"
+sleep 16; ls -l "$EVID/live-first-launch.png"
 ```
 Ready = a window titled `Cofferly` exists (`xdotool search --name Cofferly`); allow ~5-12 s (software rendering). ALWAYS set `COFFERLY_DATA_DIR`; never point at a real vault.
 
@@ -32,7 +36,7 @@ Deterministic screens use the app's own capture mode (one target per process, re
 COFFERLY_DATA_DIR=$D COFFERLY_CAPTURE=wallet COFFERLY_CAPTURE_DIR=$EVID \
   xvfb-run -a -s "-screen 0 1280x900x24" timeout 150 target/release/Cofferly
 ```
-Targets: `story-unlock`, `wallet`, `settings`, `story-setup`. Files: `cofferly-<target>.png`. For real interaction on the live window use `xdotool` (`mousemove/click/type`) against `DISPLAY` of the Xvfb, then `import -window root`; egui exposes no DOM/ARIA handles, so locate widgets from screenshots (window is min 820x560). Feature journeys: `features/README.md`.
+Targets: `story-unlock`, `wallet`, `settings`, `story-setup`. Files written to `$COFFERLY_CAPTURE_DIR` (exactly `CaptureTarget::file_name` in `src/capture.rs`): `cofferly-story-unlock.png`, `cofferly-wallet-screen.png`, `cofferly-settings-screen.png`, `cofferly-story-setup.png`; `scripts/check-docs.sh` fails if this list drifts. For real interaction on the live window use `xdotool` (`mousemove/click/type`) against `DISPLAY` of the Xvfb, then `import -window root`; egui exposes no DOM/ARIA handles, so locate widgets from screenshots (window is min 820x560). Feature journeys: `features/README.md`.
 
 ## Evidence
 Save under `$EVID` (default `/workspace/verify-<date>/cofferly-evidence/`, never in the repo): before/after PNGs, stderr log, capture transcript, data-dir listing. Proof = real user path (live launch or capture of the real UI code), the action and the resulting state, plus side effects (vault file present in data dir). Don't print story words or PINs from screenshots into PR text beyond the throwaway-demo ones; captures use demo data only.
@@ -41,4 +45,10 @@ Save under `$EVID` (default `/workspace/verify-<date>/cofferly-evidence/`, never
 Fresh `mktemp -d` data dir and `xvfb-run -a` (auto display number) per run, so instances can run side by side. Never launch against the user's real data dir or real display.
 
 ## Cleanup
-`kill` the PIDs you started (`$P`), `rm -rf "$D"`. Never `pkill Cofferly`. Leave `$EVID` intact.
+Kill the process group by PGID (never `pkill -f`/`pkill Cofferly`), remove the temp dir, then ASSERT it is gone. The app opens no ports; the check proves nothing of ours (app or Xvfb) is listening and the launcher group is dead. Leave `$EVID` intact.
+```bash
+kill -- -"$PGID" 2>/dev/null; sleep 2; kill -9 -- -"$PGID" 2>/dev/null; rm -rf "$D"
+if ps -o pid= -g "$PGID" | grep -q .; then echo "FAIL: process group $PGID still alive"; false; fi
+if ss -ltnp | grep -E 'Cofferly|Xvfb'; then echo "FAIL: listener still up"; false; fi
+echo "cleanup OK: group $PGID gone, no Cofferly/Xvfb listeners"
+```
