@@ -3,6 +3,7 @@ use crate::app_export::{
     export_opened_status, export_opener_failed_status, filtered_export_opened_status,
 };
 use crate::data::ledger_filter_summary;
+use crate::test_support::{data_dir_lock, ScopedDataDir};
 use chrono::NaiveDate;
 use eframe::App as _;
 use eframe::Storage as _;
@@ -1190,47 +1191,6 @@ impl eframe::Storage for FakeStorage {
     fn flush(&mut self) {}
 }
 
-/// Serializes every reader/writer of `COFFERLY_DATA_DIR` so parallel tests
-/// cannot overwrite each other's data dir.
-static COFFERLY_DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Points `COFFERLY_DATA_DIR` at a temp dir for the life of the guard and
-/// restores the previous value on drop, so this test cannot leak state to
-/// others even if an assertion panics.
-///
-/// Construction holds `COFFERLY_DATA_DIR_LOCK` for the guard lifetime.
-struct ScopedDataDir {
-    previous: Option<String>,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-impl ScopedDataDir {
-    fn set(path: &std::path::Path) -> Self {
-        let lock = COFFERLY_DATA_DIR_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let previous = std::env::var("COFFERLY_DATA_DIR").ok();
-        // SAFETY: the mutex serializes every reader/writer of this env var.
-        unsafe { std::env::set_var("COFFERLY_DATA_DIR", path) };
-        Self {
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for ScopedDataDir {
-    fn drop(&mut self) {
-        // SAFETY: see `set` above.
-        unsafe {
-            match &self.previous {
-                Some(previous) => std::env::set_var("COFFERLY_DATA_DIR", previous),
-                None => std::env::remove_var("COFFERLY_DATA_DIR"),
-            }
-        }
-    }
-}
-
 #[test]
 fn restarting_with_more_than_two_wallets_keeps_the_previously_selected_wallet() {
     // Regression test: `CofferlyApp::new` used to clamp the persisted
@@ -1972,6 +1932,8 @@ fn cached_ledger_rows_reuses_the_same_allocation_until_invalidated() {
 
 #[test]
 fn print_path_uses_temp_directory() {
+    // `CofferlyApp::new` sweeps `cofferly-*` temp files; keep it from racing us.
+    let _data_dir_lock = data_dir_lock();
     let (app, _dir) = test_app();
     let path = app.print_path(true).unwrap();
     assert!(path.starts_with(std::env::temp_dir()));
@@ -1997,6 +1959,8 @@ fn print_path_uses_temp_directory() {
 
 #[test]
 fn print_path_uses_unpredictable_names() {
+    // `CofferlyApp::new` sweeps `cofferly-*` temp files; keep it from racing us.
+    let _data_dir_lock = data_dir_lock();
     let (app, _dir) = test_app();
     let first = app.print_path(true).unwrap();
     let second = app.print_path(true).unwrap();

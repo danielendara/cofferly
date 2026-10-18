@@ -3228,3 +3228,7 @@ fn load_story_icon_textures(ctx: &egui::Context) -> HashMap<&'static str, egui::
 
 #[cfg(test)]
 mod app_tests;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod ui_tests;
