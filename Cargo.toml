@@ -16,7 +16,7 @@ chacha20poly1305 = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "7"
 eframe = { version = "0.36", features = ["persistence"] }
-egui_extras = "0.36"
+egui_extras = "0.37"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 opener = "0.9"
 rand = "0.10"
