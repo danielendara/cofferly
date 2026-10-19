@@ -2795,7 +2795,7 @@ impl eframe::App for CofferlyApp {
 
                             response.widget_info(|| {
                                 egui::WidgetInfo::selected(
-                                    egui::WidgetType::SelectableLabel,
+                                    egui::Role::Button,
                                     true,
                                     selected,
                                     accessible_label.clone(),
@@ -3077,15 +3077,15 @@ fn restore_ledger_filters(saved: HashMap<String, String>) -> HashMap<String, Str
 }
 
 pub(crate) fn pin_digit_id(index: usize) -> egui::Id {
-    egui::Id::new(("parent_pin_digit", index))
+    egui::Id::unique(("parent_pin_digit", index))
 }
 
 pub(crate) fn entry_field_id(field: EntryFormField) -> egui::Id {
-    egui::Id::new(("entry_form_field", field))
+    egui::Id::unique(("entry_form_field", field))
 }
 
 pub(crate) fn ledger_filter_id() -> egui::Id {
-    egui::Id::new("ledger_filter")
+    egui::Id::unique("ledger_filter")
 }
 
 fn wallet_keyboard_delta(key: egui::Key) -> Option<isize> {

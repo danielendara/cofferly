@@ -15,8 +15,12 @@ argon2 = "0.6"
 chacha20poly1305 = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "7"
-eframe = { version = "0.36", features = ["persistence"] }
-egui_extras = "0.36"
+eframe = { version = "0.37", features = ["persistence"] }
+# Not used directly: egui 0.37 made the bundled emoji/symbol fonts opt-in, and eframe
+# does not forward the feature. Without it ○ and ⚠ render as tofu. (● comes from the
+# Hack fallback added in theme::configure_style, not from this feature.)
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
+egui_extras = "0.37"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 opener = "0.9"
 rand = "0.10"
@@ -27,7 +31,7 @@ tempfile = "3"
 zeroize = { version = "1", features = ["alloc"] }
 
 [dev-dependencies]
-egui_kittest = { version = "=0.36.2", features = ["eframe"] }
+egui_kittest = { version = "=0.37.0", features = ["eframe"] }
 
 [profile.release]
 opt-level = 2

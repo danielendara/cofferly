@@ -7,6 +7,16 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    groups:
+      # eframe, egui_extras and egui_kittest must share one egui version;
+      # bumping one alone leaves two egui crates in the tree and breaks the build.
+      egui:
+        patterns:
+          - "egui*"
+          - "eframe"
+          - "epaint*"
+          - "emath"
+          - "ecolor"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
