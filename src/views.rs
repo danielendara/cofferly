@@ -134,8 +134,7 @@ impl CofferlyApp {
                                                 .frame(egui::Frame::NONE)
                                                 .background_color(egui::Color32::TRANSPARENT)
                                                 .text_color(egui::Color32::TRANSPARENT)
-                                                .horizontal_align(egui::Align::Center)
-                                                .vertical_align(egui::Align::Center)
+                                                .align(egui::Align2::CENTER_CENTER)
                                                 .char_limit(PIN_LENGTH)
                                                 .desired_width(54.0)
                                                 .interactive(pin_entry_enabled),
@@ -566,7 +565,7 @@ impl CofferlyApp {
                                 let accessible_label = format!("Coffer Story object: {label}");
                                 response.widget_info(|| {
                                     egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Button,
+                                        egui::Role::Button,
                                         enabled,
                                         accessible_label.clone(),
                                     )
@@ -746,7 +745,7 @@ impl CofferlyApp {
             )
             .widget_info(|| {
                 let mut info = egui::WidgetInfo::labeled(
-                    egui::WidgetType::ProgressIndicator,
+                    egui::Role::ProgressIndicator,
                     true,
                     accessible.clone(),
                 );
@@ -781,7 +780,7 @@ impl CofferlyApp {
         let scroll_height = settings_scroll_height(ctx.content_rect().height(), self.capturing);
         let mut close_requested = false;
 
-        let response = egui::Modal::new(egui::Id::new("settings_modal"))
+        let response = egui::Modal::new(egui::Id::unique("settings_modal"))
             .backdrop_color(egui::Color32::from_black_alpha(96))
             .frame(
                 egui::Frame::new()
@@ -1002,7 +1001,7 @@ impl CofferlyApp {
                                         let label = format!("Remove latest entry: {p}");
                                         remove_response.widget_info(|| {
                                             egui::WidgetInfo::labeled(
-                                                egui::WidgetType::Button,
+                                                egui::Role::Button,
                                                 has_entries,
                                                 label.clone(),
                                             )
@@ -1417,7 +1416,7 @@ impl CofferlyApp {
                     .labelled_by(desc_label.id);
                 desc_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
-                        egui::WidgetType::TextEdit,
+                        egui::Role::TextInput,
                         true,
                         description_length_accessible_name(&self.draft.description),
                     )
@@ -1558,7 +1557,7 @@ impl CofferlyApp {
                     );
                     let name = format!("Remove entry {date}: {description}");
                     response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone())
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, name.clone())
                     });
                     response.clicked()
                 } else {
@@ -1687,7 +1686,7 @@ impl CofferlyApp {
                         .on_hover_text(tooltip);
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
+                            egui::Role::Button,
                             true,
                             ledger_date_sort_accessible_name(ledger_sort),
                         )
@@ -1772,11 +1771,7 @@ impl CofferlyApp {
                             .size(if is_start { 10.0 } else { 11.0 })
                             .color(balance_color(ledger_row.amount_cents));
                         ui.label(amt).widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
-                                true,
-                                accessible.clone(),
-                            )
+                            egui::WidgetInfo::labeled(egui::Role::Label, true, accessible.clone())
                         });
                     });
                     row.col(|ui| {
@@ -1811,7 +1806,7 @@ impl CofferlyApp {
                         });
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
+                                egui::Role::Button,
                                 parent_unlocked && !being_edited,
                                 format!(
                                     "Edit entry {}: {}",
@@ -1968,12 +1963,7 @@ fn paint_money_kind_button(
         .stroke(stroke),
     );
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::RadioButton,
-            true,
-            selected,
-            access.clone(),
-        )
+        egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, access.clone())
     });
     if response.clicked() {
         *current = apply_money_kind_click(*current, kind, enter_pressed);
@@ -2043,7 +2033,7 @@ const CHILD_NAME_LABEL: &str = "Child name";
 const LEDGER_FILTER_LABEL: &str = "Filter ledger by description";
 
 fn text_edit_info(name: &str) -> egui::WidgetInfo {
-    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name)
+    egui::WidgetInfo::labeled(egui::Role::TextInput, true, name)
 }
 
 fn settings_field_label(ui: &mut egui::Ui, label: &str) {
@@ -2069,7 +2059,7 @@ fn settings_input_action_row<R>(
 fn draw_pin_coin(ui: &egui::Ui, index: usize, rect: egui::Rect, filled: bool, active: bool) {
     let painter = ui.ctx().layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
-        egui::Id::new(("pin_coin", index)),
+        egui::Id::unique(("pin_coin", index)),
     ));
     let center = rect.center();
     let radius = rect.width().min(rect.height()) * 0.35;

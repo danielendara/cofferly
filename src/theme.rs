@@ -94,6 +94,16 @@ pub fn configure_style(ctx: &egui::Context) {
     // Cofferly uses a deliberately light, warm palette. Pinning the egui theme
     // prevents unconfigured system-dark defaults from leaking into light cards.
     ctx.set_theme(egui::Theme::Light);
+
+    // None of egui's bundled proportional fonts has the filled story-progress
+    // dot (U+25CF); the bundled Hack font does. Append it as the last fallback
+    // so the dot draws instead of a missing-glyph box.
+    let mut fonts = egui::FontDefinitions::default();
+    if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        proportional.push("Hack".to_owned());
+    }
+    ctx.set_fonts(fonts);
+
     let mut style = (*ctx.global_style()).clone();
 
     style.spacing.item_spacing = vec2(12.0, 10.0);

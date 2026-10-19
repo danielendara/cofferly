@@ -16,7 +16,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::NaiveDate;
 use eframe::egui::{self, ColorImage};
@@ -65,6 +65,8 @@ pub struct CaptureSession {
     current: Option<CaptureTarget>,
     frames_on_target: u32,
     waiting_for_shot: bool,
+    /// Filled by the egui 0.37 screenshot callback once the frame is read back.
+    pending_shot: Arc<Mutex<Option<Arc<ColorImage>>>>,
     done: bool,
 }
 
@@ -115,6 +117,7 @@ impl CaptureSession {
             current: None,
             frames_on_target: 0,
             waiting_for_shot: false,
+            pending_shot: Arc::new(Mutex::new(None)),
             done: false,
         })
     }
@@ -144,34 +147,42 @@ impl CaptureSession {
 
         self.frames_on_target = self.frames_on_target.saturating_add(1);
         if !self.waiting_for_shot && self.frames_on_target >= 5 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            let slot = Arc::clone(&self.pending_shot);
+            let repaint_ctx = ctx.clone();
+            ctx.request_screenshot(move |image| {
+                if let Ok(mut slot) = slot.lock() {
+                    *slot = Some(image);
+                }
+                repaint_ctx.request_repaint();
+            });
             self.waiting_for_shot = true;
         }
 
         let mut saved_path: Option<PathBuf> = None;
-        ctx.input(|input| {
-            for event in &input.events {
-                if let egui::Event::Screenshot { image, .. } = event {
-                    if let Some(target) = self.current {
-                        let path = self.out_dir.join(target.file_name());
-                        match save_color_image(image, &path) {
-                            Ok(()) => {
-                                eprintln!("COFFERLY_CAPTURE: wrote {}", path.display());
-                                saved_path = Some(path);
-                            }
-                            Err(err) => {
-                                eprintln!(
-                                    "COFFERLY_CAPTURE: failed to write {}: {err}",
-                                    path.display()
-                                );
-                                // Advance anyway so we do not loop forever.
-                                saved_path = Some(path);
-                            }
-                        }
+        let shot = self
+            .pending_shot
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        if let Some(image) = shot {
+            if let Some(target) = self.current {
+                let path = self.out_dir.join(target.file_name());
+                match save_color_image(&image, &path) {
+                    Ok(()) => {
+                        eprintln!("COFFERLY_CAPTURE: wrote {}", path.display());
+                        saved_path = Some(path);
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "COFFERLY_CAPTURE: failed to write {}: {err}",
+                            path.display()
+                        );
+                        // Advance anyway so we do not loop forever.
+                        saved_path = Some(path);
                     }
                 }
             }
-        });
+        }
 
         if saved_path.is_some() {
             self.current = None;
