@@ -31,6 +31,9 @@ Need `libxkbcommon-x11-0`, `libxcb-xkb1`, and a Vulkan ICD (`mesa-vulkan-drivers
 `test -x target/release/Cofferly && xvfb-run -a true && echo ok`; then a capture run (below) exiting 0 with a PNG proves the render stack works. Check `git rev-parse HEAD` matches the build you are proving (rebuild if not).
 
 ## Drive
+### Drive → headless (no display, GPU or xdotool)
+`cargo test ui_tests -- --nocapture` drives the real `eframe::App::update` through `egui_kittest` (AccessKit): widgets are found by role and accessible label (for example `Record spending`, `Lock`, `Coffer Story object: <name>`) and by key events, never by coordinates. `src/ui_tests.rs` builds the app with `CofferlyApp::new` against an empty temp `COFFERLY_DATA_DIR` (hold a `ScopedDataDir`). Add a journey there for UI-state behaviour before reaching for the xdotool recipe below.
+
 Deterministic screens use the app's own capture mode (one target per process, requires `COFFERLY_DATA_DIR`, builds a demo vault in it):
 ```bash
 COFFERLY_DATA_DIR=$D COFFERLY_CAPTURE=wallet COFFERLY_CAPTURE_DIR=$EVID \
