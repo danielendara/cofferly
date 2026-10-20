@@ -38,12 +38,10 @@ pub fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
         return Err("Enter a dollar amount.".to_owned());
     }
 
-    // Ledger/sidebar copy uses grouping (`$1,234.56`, thin spaces). Strip those
-    // from the dollar part so a paste round-trips through `format_money`.
-    let dollars: String = dollars
-        .chars()
-        .filter(|character| *character != ',' && !character.is_whitespace())
-        .collect();
+    // Ledger/sidebar copy uses grouping (`$1,234.56`, thin spaces), so a paste
+    // round-trips through `format_money`. Separators are only valid between
+    // digit groups; anything else (`1,50`) is rejected, not guessed at.
+    let dollars = strip_digit_group_separators(dollars)?;
 
     if !dollars.chars().all(|character| character.is_ascii_digit())
         || !cents.chars().all(|character| character.is_ascii_digit())
@@ -74,6 +72,35 @@ pub fn parse_dollars_to_cents(input: &str) -> Result<i64, String> {
             .ok_or_else(|| "Amount is too large.".to_owned())
     } else {
         Ok(amount)
+    }
+}
+
+/// Removes thousands separators from the dollar part. With separators, the
+/// part must be a 1-3 digit group followed by exact 3-digit groups, all split
+/// by the same kind of separator (`,` or whitespace).
+fn strip_digit_group_separators(dollars: &str) -> Result<String, String> {
+    let is_separator = |character: char| character == ',' || character.is_whitespace();
+    let Some(first_separator) = dollars.chars().find(|character| is_separator(*character)) else {
+        return Ok(dollars.to_owned());
+    };
+    let same_kind = |character: char| {
+        if first_separator == ',' {
+            character == ','
+        } else {
+            character.is_whitespace()
+        }
+    };
+    let mut groups = dollars.split(same_kind);
+    let leading = groups.next().unwrap_or_default();
+    let valid = (1..=3).contains(&leading.len())
+        && groups.all(|group| group.len() == 3)
+        && dollars
+            .split(same_kind)
+            .all(|group| group.chars().all(|character| character.is_ascii_digit()));
+    if valid {
+        Ok(dollars.split(same_kind).collect())
+    } else {
+        Err("Use a period for cents, and group thousands like 1,234.".to_owned())
     }
 }
 
@@ -150,6 +177,41 @@ mod tests {
             parse_dollars_to_cents(&format_money(100_000_000)).unwrap(),
             100_000_000
         );
+    }
+
+    #[test]
+    fn rejects_separators_outside_digit_groups() {
+        for input in [
+            "1,50",
+            "12,5",
+            "2 50",
+            "1,2,3",
+            "1,0000",
+            ",500",
+            "1, 234",
+            "1,234 567",
+            "1,234,",
+            "1,,234",
+            "1,234,56",
+            "1,234.5,6",
+            "1,50.00",
+            "1\u{2009}50",
+            "1,234 ,567",
+        ] {
+            assert!(parse_dollars_to_cents(input).is_err(), "{input}");
+        }
+    }
+
+    #[test]
+    fn accepts_separators_between_digit_groups() {
+        assert_eq!(parse_dollars_to_cents("1234").unwrap(), 123_400);
+        assert_eq!(parse_dollars_to_cents("1,234").unwrap(), 123_400);
+        assert_eq!(parse_dollars_to_cents("12,345").unwrap(), 1_234_500);
+        assert_eq!(parse_dollars_to_cents("123,456.78").unwrap(), 12_345_678);
+        assert_eq!(parse_dollars_to_cents("1 234 567").unwrap(), 123_456_700);
+        assert_eq!(parse_dollars_to_cents("1\u{00A0}234").unwrap(), 123_400);
+        assert_eq!(parse_dollars_to_cents("-$1,234.56").unwrap(), -123_456);
+        assert_eq!(parse_dollars_to_cents("1,000,000.00").unwrap(), 100_000_000);
     }
 
     #[test]
