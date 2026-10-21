@@ -1102,7 +1102,7 @@ impl CofferlyApp {
                                     .color(theme::TEXT_SECONDARY),
                                 );
                                 ui.add_space(8.0);
-                                if let Some(dest) = self.pending_backup_overwrite.clone() {
+                                if let Some(dest) = self.prompts.backup_overwrite().cloned() {
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "{} already exists. Replace it with a new backup?",
@@ -1199,7 +1199,7 @@ impl CofferlyApp {
                                         .size(12.0)
                                         .color(theme::TEXT_SECONDARY),
                                     );
-                                } else if self.confirm_delete_wallet {
+                                } else if self.prompts.delete_wallet_pending() {
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "Delete {selected_name} and every entry? This cannot be undone."
@@ -1231,7 +1231,7 @@ impl CofferlyApp {
                                             )
                                             .clicked()
                                         {
-                                            self.confirm_delete_wallet = false;
+                                            self.prompts.dismiss_delete_wallet();
                                             self.set_status_info("Wallet deletion cancelled.");
                                         }
                                     });
@@ -1248,7 +1248,7 @@ impl CofferlyApp {
                                     )
                                     .clicked()
                                 {
-                                    self.confirm_delete_wallet = true;
+                                    self.prompts.arm_delete_wallet();
                                     self.set_status_info(format!(
                                         "Confirm deletion of {selected_name} and all its entries."
                                     ));
@@ -1304,7 +1304,7 @@ impl CofferlyApp {
 
         if close_requested || response.should_close() {
             self.show_settings = false;
-            self.confirm_delete_wallet = false;
+            self.prompts.dismiss_delete_wallet();
         }
     }
 
@@ -1472,7 +1472,7 @@ impl CofferlyApp {
                     || date_response.changed()
                     || self.draft.kind != kind_before
                 {
-                    self.remove_edited_confirm = None;
+                    self.prompts.dismiss_remove_edited();
                 }
 
                 let enter_submit = enter_pressed
@@ -1484,7 +1484,7 @@ impl CofferlyApp {
                         || date_response.has_focus()
                         || kind_has_focus);
 
-                let awaiting_negative_confirm = self.confirm_negative_cents.is_some()
+                let awaiting_negative_confirm = self.prompts.spend_anyway_pending()
                     && matches!(self.draft.kind, crate::data::EntryKind::Deduction);
 
                 if awaiting_negative_confirm {
@@ -1543,7 +1543,7 @@ impl CofferlyApp {
                             )
                         })
                         .unwrap_or_default();
-                    let confirming = self.remove_edited_confirm.is_some();
+                    let confirming = self.prompts.remove_edited_pending();
                     let response = ui.add_sized(
                         [ui.available_width(), 32.0],
                         egui::Button::new(

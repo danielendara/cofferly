@@ -3,6 +3,7 @@ use crate::app_export::{
     export_opened_status, export_opener_failed_status, filtered_export_opened_status,
 };
 use crate::data::ledger_filter_summary;
+use crate::prompts::Prompts;
 use crate::test_support::{data_dir_lock, ScopedDataDir};
 use chrono::NaiveDate;
 use eframe::App as _;
@@ -44,11 +45,8 @@ fn test_app() -> (CofferlyApp, TempDir) {
         lock_screen_bg: theme::APP_BG,
         open_coffer_image: None,
         show_settings: false,
-        confirm_delete_wallet: false,
-        confirm_negative_cents: None,
-        undo: None,
+        prompts: Prompts::default(),
         entry_edit: None,
-        remove_edited_confirm: None,
         pending_ledger_edit_focus: None,
         last_interaction: Instant::now(),
         unlocking: false,
@@ -60,7 +58,6 @@ fn test_app() -> (CofferlyApp, TempDir) {
         temp_artifact_paths: Vec::new(),
         pending_wallet_selection_name: None,
         last_backup: None,
-        pending_backup_overwrite: None,
         restore: None,
     };
     (app, dir)
@@ -376,7 +373,7 @@ fn editing_an_entry_rewrites_it_in_place_and_leaves_an_undo() {
     assert_eq!(entry.date, NaiveDate::from_ymd_opt(2026, 9, 5).unwrap());
     assert_eq!(app.status.severity, StatusSeverity::Success);
     assert!(app.entry_edit.is_none());
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
     // Focus goes back to the row the correction came from.
     assert_eq!(app.pending_ledger_edit_focus, Some(1));
     // The entry count never changes — a correction is not a delete + add.
@@ -399,7 +396,7 @@ fn undo_restores_the_entry_exactly_as_it_was() {
 
     assert_eq!(app.selected_wallet().entries, before);
     assert_eq!(app.status.severity, StatusSeverity::Success);
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
 }
 
 #[test]
@@ -472,7 +469,10 @@ fn edit_write_failure_rolls_the_ledger_back_to_disk() {
         before,
         "an unsaved correction must not survive in memory"
     );
-    assert!(app.undo.is_none(), "nothing to undo — nothing was applied");
+    assert!(
+        app.prompts.undo().is_none(),
+        "nothing to undo — nothing was applied"
+    );
 }
 
 #[test]
@@ -518,11 +518,11 @@ fn switching_wallets_drops_a_pending_correction_undo() {
     app.begin_entry_edit(0);
     app.draft.amount = "11.00".to_owned();
     app.commit_entry_edit();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 
     app.select_wallet(1);
     assert!(
-        app.undo.is_none(),
+        app.prompts.undo().is_none(),
         "undo after a wallet switch would restore into the wrong ledger"
     );
 }
@@ -536,7 +536,7 @@ fn a_correction_that_changes_nothing_is_a_no_op() {
     app.commit_entry_edit();
 
     assert_eq!(app.selected_wallet().entries, before);
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
     assert!(app.entry_edit.is_none());
 }
 
@@ -796,14 +796,14 @@ fn backup_asks_before_replacing_an_existing_file() {
 
     app.back_up_vault_to(dest.clone(), false);
     assert_eq!(
-        app.pending_backup_overwrite.as_deref(),
+        app.prompts.backup_overwrite().map(|path| path.as_path()),
         Some(dest.as_path())
     );
     assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
     assert!(app.last_backup.is_none());
 
     app.cancel_backup_overwrite();
-    assert!(app.pending_backup_overwrite.is_none());
+    assert!(app.prompts.backup_overwrite().is_none());
     assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
 
     app.back_up_vault_to(dest.clone(), true);
@@ -817,10 +817,10 @@ fn locking_clears_a_pending_backup_overwrite_prompt() {
     std::fs::write(&dest, b"older backup").unwrap();
 
     app.back_up_vault_to(dest.clone(), false);
-    assert!(app.pending_backup_overwrite.is_some());
+    assert!(app.prompts.backup_overwrite().is_some());
 
     app.lock_parent();
-    assert!(app.pending_backup_overwrite.is_none());
+    assert!(app.prompts.backup_overwrite().is_none());
     assert_eq!(std::fs::read(&dest).unwrap(), b"older backup");
 }
 
@@ -831,10 +831,10 @@ fn opening_settings_clears_a_pending_backup_overwrite_prompt() {
     std::fs::write(&dest, b"older backup").unwrap();
 
     app.back_up_vault_to(dest, false);
-    assert!(app.pending_backup_overwrite.is_some());
+    assert!(app.prompts.backup_overwrite().is_some());
 
     app.open_settings();
-    assert!(app.pending_backup_overwrite.is_none());
+    assert!(app.prompts.backup_overwrite().is_none());
 }
 
 #[test]
@@ -1055,12 +1055,12 @@ fn transaction_remove_and_undo_workflow_stays_encrypted() {
 
     app.remove_latest_entry();
     assert!(app.selected_wallet().entries.is_empty());
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
     assert!(app.status.text.contains("Undo available"));
 
     app.undo_remove_entry();
     assert_eq!(app.selected_wallet().current_balance_cents(), 1050);
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
     assert_eq!(saved_data(&app, "1234").wallets[0].entries.len(), 1);
 }
 
@@ -1077,11 +1077,11 @@ fn switching_wallets_clears_a_pending_undo_from_a_different_wallet() {
     app.draft.amount = "$10.50".to_owned();
     app.add_entry();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 
     app.select_wallet(1);
 
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
 }
 
 /// Feeds a single key press through a real egui input pass, mirroring how
@@ -1146,12 +1146,12 @@ fn keyboard_wallet_switch_announces_name_and_balance_and_clears_undo() {
     app.draft.amount = "$10.50".to_owned();
     app.add_entry();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 
     app.apply_wallet_keyboard_delta(1);
 
     assert_eq!(app.selected_wallet, 1);
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
     assert_eq!(app.status.text, wallet_selection_announcement("Child 2", 0));
     assert!(app.status.text.contains("Child 2"));
     assert!(app.status.text.contains("balance"));
@@ -1165,12 +1165,12 @@ fn keyboard_wallet_switch_at_the_edge_does_not_clear_undo() {
     app.draft.amount = "$10.50".to_owned();
     app.add_entry();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 
     app.apply_wallet_keyboard_delta(-1);
 
     assert_eq!(app.selected_wallet, 0);
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 }
 
 /// Minimal in-memory `eframe::Storage` so `CofferlyApp::new` can restore
@@ -1843,7 +1843,7 @@ fn add_entry_write_failure_rolls_back_and_keeps_the_draft() {
 fn add_entry_write_failure_keeps_the_earlier_pending_undo() {
     let (mut app, dir) = app_with_entries();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
     app.data_path = unwritable_data_path(&dir);
     app.draft.kind = EntryKind::Deposit;
     app.draft.description = "Birthday".to_owned();
@@ -1854,7 +1854,10 @@ fn add_entry_write_failure_keeps_the_earlier_pending_undo() {
 
     assert_eq!(app.status.severity, StatusSeverity::Error);
     assert_eq!(app.selected_wallet().entries, before_entries);
-    assert!(app.undo.is_some(), "failed add must keep the pending undo");
+    assert!(
+        app.prompts.undo().is_some(),
+        "failed add must keep the pending undo"
+    );
 }
 
 #[cfg(unix)]
@@ -2181,13 +2184,37 @@ fn locking_cancels_an_in_progress_correction() {
 }
 
 #[test]
+fn lock_clears_every_prompt() {
+    let (mut app, _dir) = app_with_entries();
+    let entry = app.selected_wallet().entries[0].clone();
+    app.prompts.arm_delete_wallet();
+    app.prompts.arm_spend_anyway(500);
+    app.prompts.arm_remove_edited(1);
+    app.prompts
+        .arm_backup_overwrite(PathBuf::from("backup.cofferly"));
+    app.prompts.arm_undo(PendingUndo::Removed(RemovableEntry {
+        wallet_index: 0,
+        entry,
+        entry_index: None,
+    }));
+    assert!(!app.prompts.is_idle(), "test must arm every prompt");
+
+    app.lock_parent();
+
+    assert!(
+        app.prompts.is_idle(),
+        "a prompt survived lock; clear it via Prompts::dismiss_all() in src/prompts.rs"
+    );
+}
+
+#[test]
 fn locking_drops_a_pending_undo() {
     let (mut app, _dir) = app_with_entries();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 
     app.lock_parent();
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
 }
 
 #[test]
@@ -2294,7 +2321,7 @@ fn remove_latest_entry_removes_newest_by_date_not_append_order() {
     assert_eq!(app.selected_wallet().entries.len(), 1);
     assert_eq!(app.selected_wallet().entries[0].description, "Backdated");
     assert!(app.status.text.contains("Recent"));
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
 }
 
 #[test]
@@ -2431,7 +2458,7 @@ fn money_out_that_would_go_negative_asks_confirm_before_commit() {
     app.add_entry();
 
     assert!(app.selected_wallet().entries.is_empty());
-    assert_eq!(app.confirm_negative_cents, Some(500));
+    assert!(app.prompts.spend_anyway_is(500));
     assert!(app.status.text.contains("would leave Child 1 at -$5.00"));
     assert_eq!(app.status.severity, StatusSeverity::Info);
 
@@ -2440,7 +2467,7 @@ fn money_out_that_would_go_negative_asks_confirm_before_commit() {
     assert_eq!(app.selected_wallet().entries.len(), 1);
     assert_eq!(app.selected_wallet().entries[0].amount_cents, -500);
     assert_eq!(app.selected_wallet().current_balance_cents(), -500);
-    assert!(app.confirm_negative_cents.is_none());
+    assert!(!app.prompts.spend_anyway_pending());
     assert!(app.status.text.contains("Deducted $5.00"));
     assert_eq!(app.status.severity, StatusSeverity::Success);
 }
@@ -2452,13 +2479,13 @@ fn changing_the_money_out_amount_requires_a_fresh_negative_confirm() {
     app.draft.description = "Snack".to_owned();
     app.draft.amount = "5".to_owned();
     app.add_entry();
-    assert_eq!(app.confirm_negative_cents, Some(500));
+    assert!(app.prompts.spend_anyway_is(500));
 
     app.draft.amount = "8".to_owned();
     app.add_entry();
 
     assert!(app.selected_wallet().entries.is_empty());
-    assert_eq!(app.confirm_negative_cents, Some(800));
+    assert!(app.prompts.spend_anyway_is(800));
     assert!(app.status.text.contains("would leave Child 1 at -$8.00"));
 }
 
@@ -2468,13 +2495,13 @@ fn deposits_do_not_require_a_negative_balance_confirm() {
     app.draft.kind = EntryKind::Deposit;
     app.draft.description = "Weekly allowance".to_owned();
     app.draft.amount = "10".to_owned();
-    app.confirm_negative_cents = Some(1000);
+    app.prompts.arm_spend_anyway(1000);
 
     app.add_entry();
 
     assert_eq!(app.selected_wallet().entries.len(), 1);
     assert_eq!(app.selected_wallet().entries[0].amount_cents, 1000);
-    assert!(app.confirm_negative_cents.is_none());
+    assert!(!app.prompts.spend_anyway_pending());
     assert!(app.status.text.contains("Added $10.00"));
 }
 
@@ -2490,7 +2517,7 @@ fn money_out_that_stays_non_negative_commits_without_confirm() {
 
     assert_eq!(app.selected_wallet().entries.len(), 1);
     assert_eq!(app.selected_wallet().current_balance_cents(), 0);
-    assert!(app.confirm_negative_cents.is_none());
+    assert!(!app.prompts.spend_anyway_pending());
     assert!(app.status.text.contains("Deducted $10.00"));
 }
 
@@ -2501,11 +2528,11 @@ fn canceling_a_negative_spend_confirm_does_not_record_the_entry() {
     app.draft.description = "Snack".to_owned();
     app.draft.amount = "5".to_owned();
     app.add_entry();
-    assert_eq!(app.confirm_negative_cents, Some(500));
+    assert!(app.prompts.spend_anyway_is(500));
 
     app.cancel_negative_spend_confirm();
 
-    assert!(app.confirm_negative_cents.is_none());
+    assert!(!app.prompts.spend_anyway_pending());
     assert!(app.selected_wallet().entries.is_empty());
     assert_eq!(app.status.text, "Spending not recorded.");
 }
@@ -2549,7 +2576,7 @@ fn successful_money_out_after_negative_confirm_also_focuses_description() {
     app.draft.description = "Snack".to_owned();
     app.draft.amount = "5".to_owned();
     app.add_entry();
-    assert_eq!(app.confirm_negative_cents, Some(500));
+    assert!(app.prompts.spend_anyway_is(500));
 
     app.add_entry();
 
@@ -3208,7 +3235,7 @@ fn remove_latest_entry_write_failure_restores_ledger_and_undo() {
     let before_entries = app.selected_wallet().entries.clone();
     let before_data = data_snapshot(&app);
     let before_raw = app.raw_bytes.clone();
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
     app.data_path = unwritable_data_path(&dir);
 
     app.remove_latest_entry();
@@ -3218,14 +3245,17 @@ fn remove_latest_entry_write_failure_restores_ledger_and_undo() {
     assert_eq!(app.selected_wallet().entries, before_entries);
     assert_eq!(data_snapshot(&app), before_data);
     assert_eq!(app.raw_bytes, before_raw);
-    assert!(app.undo.is_none(), "failed removal must not leave an undo");
+    assert!(
+        app.prompts.undo().is_none(),
+        "failed removal must not leave an undo"
+    );
 }
 
 #[test]
 fn undo_removed_entry_write_failure_restores_ledger_and_undo() {
     let (mut app, dir) = app_with_entries();
     app.remove_latest_entry();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
     let before_entries = app.selected_wallet().entries.clone();
     let before_data = data_snapshot(&app);
     let before_raw = app.raw_bytes.clone();
@@ -3238,7 +3268,10 @@ fn undo_removed_entry_write_failure_restores_ledger_and_undo() {
     assert_eq!(app.selected_wallet().entries, before_entries);
     assert_eq!(data_snapshot(&app), before_data);
     assert_eq!(app.raw_bytes, before_raw);
-    assert!(app.undo.is_some(), "failed undo must keep the pending undo");
+    assert!(
+        app.prompts.undo().is_some(),
+        "failed undo must keep the pending undo"
+    );
 }
 
 #[test]
@@ -3248,7 +3281,7 @@ fn undo_edited_entry_write_failure_restores_ledger_and_undo() {
     app.draft.amount = "20.00".to_owned();
     app.draft.description = "Birthday cash".to_owned();
     app.commit_entry_edit();
-    assert!(app.undo.is_some());
+    assert!(app.prompts.undo().is_some());
     let before_entries = app.selected_wallet().entries.clone();
     let before_data = data_snapshot(&app);
     let before_raw = app.raw_bytes.clone();
@@ -3261,7 +3294,10 @@ fn undo_edited_entry_write_failure_restores_ledger_and_undo() {
     assert_eq!(app.selected_wallet().entries, before_entries);
     assert_eq!(data_snapshot(&app), before_data);
     assert_eq!(app.raw_bytes, before_raw);
-    assert!(app.undo.is_some(), "failed undo must keep the pending undo");
+    assert!(
+        app.prompts.undo().is_some(),
+        "failed undo must keep the pending undo"
+    );
 }
 
 #[test]
@@ -3375,7 +3411,7 @@ fn remove_edited_entry_needs_two_clicks_and_removes_a_middle_entry() {
         before,
         "first click removes nothing"
     );
-    assert_eq!(app.remove_edited_confirm, Some(1));
+    assert!(app.prompts.remove_edited_is(1));
     assert!(app.status.text.contains("bkie repair"));
 
     app.remove_edited_entry();
@@ -3384,7 +3420,7 @@ fn remove_edited_entry_needs_two_clicks_and_removes_a_middle_entry() {
     assert_eq!(after[0], before[0]);
     assert_eq!(after[1], before[2]);
     assert!(app.entry_edit.is_none());
-    assert!(app.remove_edited_confirm.is_none());
+    assert!(!app.prompts.remove_edited_pending());
     assert_eq!(app.draft.description, "Half-typed", "add-draft restored");
     assert!(app.status.text.ends_with("Undo available."));
 
@@ -3420,7 +3456,7 @@ fn remove_edited_confirmation_is_dropped_by_cancel_wallet_switch_and_lock() {
     app.begin_entry_edit(1);
     app.remove_edited_entry();
     app.cancel_entry_edit();
-    assert!(app.remove_edited_confirm.is_none());
+    assert!(!app.prompts.remove_edited_pending());
     assert_eq!(app.selected_wallet().entries, before);
 
     app.data.wallets.push(Wallet {
@@ -3430,7 +3466,7 @@ fn remove_edited_confirmation_is_dropped_by_cancel_wallet_switch_and_lock() {
     app.begin_entry_edit(1);
     app.remove_edited_entry();
     app.select_wallet(1);
-    assert!(app.remove_edited_confirm.is_none());
+    assert!(!app.prompts.remove_edited_pending());
     app.select_wallet(0);
     app.remove_edited_entry();
     assert_eq!(
@@ -3443,7 +3479,7 @@ fn remove_edited_confirmation_is_dropped_by_cancel_wallet_switch_and_lock() {
 fn lock_while_remove_confirm_is_pending_removes_nothing_and_drops_undo() {
     let (mut app, _dir) = app_with_entries();
     let before = app.selected_wallet().entries.clone();
-    app.undo = Some(PendingUndo::Removed(RemovableEntry {
+    app.prompts.arm_undo(PendingUndo::Removed(RemovableEntry {
         wallet_index: 0,
         entry: before[0].clone(),
         entry_index: None,
@@ -3451,12 +3487,12 @@ fn lock_while_remove_confirm_is_pending_removes_nothing_and_drops_undo() {
 
     app.begin_entry_edit(1);
     app.remove_edited_entry();
-    assert_eq!(app.remove_edited_confirm, Some(1));
+    assert!(app.prompts.remove_edited_is(1));
 
     app.lock_parent();
-    assert!(app.remove_edited_confirm.is_none());
+    assert!(!app.prompts.remove_edited_pending());
     assert!(app.entry_edit.is_none());
-    assert!(app.undo.is_none());
+    assert!(app.prompts.undo().is_none());
     assert_eq!(app.selected_wallet().entries, before);
 
     // A confirm click after locking is refused.
@@ -3470,7 +3506,7 @@ fn remove_edited_entry_write_failure_restores_ledger_session_draft_and_undo() {
     app.remove_latest_entry();
     app.undo_remove_entry();
     app.remove_latest_entry();
-    let previous_undo = app.undo.clone();
+    let previous_undo = app.prompts.undo().cloned();
     let before = app.selected_wallet().entries.clone();
     app.draft.description = "Half-typed".to_owned();
     app.begin_entry_edit(0);
@@ -3484,7 +3520,7 @@ fn remove_edited_entry_write_failure_restores_ledger_session_draft_and_undo() {
     assert_eq!(app.entry_edit.as_ref().map(|s| s.entry_index), Some(0));
     assert_eq!(app.draft.description, "Weekly allowance");
     assert_eq!(
-        format!("{:?}", app.undo),
+        format!("{:?}", app.prompts.undo()),
         format!("{previous_undo:?}"),
         "previous undo kept"
     );
