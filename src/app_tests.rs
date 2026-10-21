@@ -2347,6 +2347,21 @@ fn add_entry_can_use_an_earlier_date() {
 }
 
 #[test]
+fn add_entry_rejects_a_decimal_comma_amount_and_keeps_the_draft() {
+    let (mut app, _dir) = test_app();
+    app.draft.kind = EntryKind::Deposit;
+    app.draft.description = "Allowance".to_owned();
+    app.draft.amount = "1,50".to_owned();
+
+    app.add_entry();
+
+    assert!(app.selected_wallet().entries.is_empty());
+    assert!(app.status.text.contains("Enter a valid amount"));
+    assert_eq!(app.draft.amount, "1,50");
+    assert_eq!(app.draft.description, "Allowance");
+}
+
+#[test]
 fn add_entry_rejects_a_future_date() {
     let (mut app, _dir) = test_app();
     app.draft.kind = EntryKind::Deposit;
