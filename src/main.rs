@@ -14,6 +14,7 @@ mod export_csv;
 mod io;
 mod money;
 mod print_html;
+mod prompts;
 mod story;
 mod theme;
 mod views;
@@ -100,7 +101,7 @@ impl EntryDraft {
 
 /// The entry most recently removed from a wallet, held briefly so the user can
 /// undo the deletion. Cleared by any new mutation or by switching wallets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct RemovableEntry {
     wallet_index: usize,
     entry: Entry,
@@ -112,7 +113,7 @@ struct RemovableEntry {
 /// The entry most recently corrected in place, held briefly so the user can put
 /// it back. Same lifetime rules as `RemovableEntry` — one pending undo, cleared
 /// by the next mutation or a wallet switch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct EditedEntry {
     wallet_index: usize,
     entry_index: usize,
@@ -121,7 +122,7 @@ struct EditedEntry {
 
 /// The single pending undo. Removal and correction share the slot so there is
 /// never more than one "undo" on offer, and it always means the last change.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum PendingUndo {
     Removed(RemovableEntry),
     Edited(EditedEntry),
@@ -319,14 +320,9 @@ pub(crate) struct CofferlyApp {
     lock_screen_bg: egui::Color32,
     open_coffer_image: Option<egui::TextureHandle>,
     show_settings: bool,
-    confirm_delete_wallet: bool,
-    /// When `Some`, a Money-out that would leave the wallet below $0 is waiting
-    /// for a second submit of the same amount.
-    confirm_negative_cents: Option<i64>,
-    undo: Option<PendingUndo>,
+    /// Pending confirms and the undo slot; see `prompts.rs`.
+    prompts: prompts::Prompts,
     entry_edit: Option<EntryEditSession>,
-    /// Entry index of the open correction whose removal awaits a second click.
-    remove_edited_confirm: Option<usize>,
     pending_ledger_edit_focus: Option<usize>,
     last_interaction: Instant,
     /// True while Argon2id / decrypt runs off the UI thread.
@@ -349,8 +345,6 @@ pub(crate) struct CofferlyApp {
     pending_wallet_selection_name: Option<String>,
     /// Date of the last verified backup, persisted via `UiState`.
     last_backup: Option<String>,
-    /// A backup destination that already exists, awaiting "Replace".
-    pending_backup_overwrite: Option<PathBuf>,
     /// Restore in progress; drives the lock screen while `Some`.
     restore: Option<PendingRestore>,
 }
@@ -548,11 +542,8 @@ impl CofferlyApp {
             lock_screen_bg,
             open_coffer_image,
             show_settings: false,
-            confirm_delete_wallet: false,
-            confirm_negative_cents: None,
-            undo: None,
+            prompts: prompts::Prompts::default(),
             entry_edit: None,
-            remove_edited_confirm: None,
             pending_ledger_edit_focus: None,
             last_interaction: Instant::now(),
             unlocking: false,
@@ -564,7 +555,6 @@ impl CofferlyApp {
             temp_artifact_paths: Vec::new(),
             pending_wallet_selection_name: restored.wallet_name,
             last_backup: restored.last_backup_date,
-            pending_backup_overwrite: None,
             restore: None,
         }
     }
@@ -622,10 +612,7 @@ impl CofferlyApp {
             self.selected_wallet = index;
             self.ledger_filter = self.ledger_filter_for_selected();
         }
-        self.confirm_delete_wallet = false;
-        self.confirm_negative_cents = None;
-        self.remove_edited_confirm = None;
-        self.undo = None;
+        self.prompts.dismiss_for_wallet_switch();
         self.invalidate_ledger_cache();
     }
 
@@ -1018,14 +1005,10 @@ impl CofferlyApp {
         self.parent_unlocked = false;
         self.session = None;
         self.show_settings = false;
-        self.confirm_delete_wallet = false;
-        self.pending_backup_overwrite = None;
-        self.confirm_negative_cents = None;
-        self.remove_edited_confirm = None;
+        self.prompts.dismiss_all();
         if let Some(session) = self.entry_edit.take() {
             self.draft = session.stashed_draft;
         }
-        self.undo = None;
         self.clear_pin_digits();
         self.cleanup_temp_artifacts();
         self.set_status_info("Locked. Unlock parent mode to make changes.");
@@ -1534,8 +1517,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let Some(input) = self.validated_entry_input() else {
             return;
@@ -1556,8 +1538,8 @@ impl CofferlyApp {
                 .selected_wallet()
                 .current_balance_cents()
                 .saturating_sub(amount);
-            if next_balance < 0 && self.confirm_negative_cents != Some(amount) {
-                self.confirm_negative_cents = Some(amount);
+            if next_balance < 0 && !self.prompts.spend_anyway_is(amount) {
+                self.prompts.arm_spend_anyway(amount);
                 self.set_status_info(format!(
                     "This spending would leave {} at {}. Submit again to confirm.",
                     self.selected_wallet().child_name,
@@ -1566,7 +1548,7 @@ impl CofferlyApp {
                 return;
             }
         }
-        self.confirm_negative_cents = None;
+        self.prompts.dismiss_spend_anyway();
 
         let wallet_name = self.selected_wallet().child_name.clone();
 
@@ -1618,8 +1600,8 @@ impl CofferlyApp {
             return;
         };
 
-        self.confirm_delete_wallet = false;
-        self.confirm_negative_cents = None;
+        self.prompts.dismiss_delete_wallet();
+        self.prompts.dismiss_spend_anyway();
 
         let stashed_draft = self.draft.clone();
         self.draft.kind = if entry.amount_cents < 0 {
@@ -1650,8 +1632,8 @@ impl CofferlyApp {
             return;
         };
         self.draft = session.stashed_draft;
-        self.confirm_negative_cents = None;
-        self.remove_edited_confirm = None;
+        self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
         self.pending_ledger_edit_focus = Some(session.entry_index);
         self.set_status_info("Correction cancelled.");
     }
@@ -1677,15 +1659,15 @@ impl CofferlyApp {
             .cloned()
         else {
             self.entry_edit = None;
-            self.remove_edited_confirm = None;
+            self.prompts.dismiss_remove_edited();
             self.draft = session.stashed_draft;
             self.set_status_err("That entry is no longer in the ledger.");
             return;
         };
         let wallet_name = self.selected_wallet().child_name.clone();
 
-        if self.remove_edited_confirm != Some(session.entry_index) {
-            self.remove_edited_confirm = Some(session.entry_index);
+        if !self.prompts.remove_edited_is(session.entry_index) {
+            self.prompts.arm_remove_edited(session.entry_index);
             let mut text = format!(
                 "Remove {} · {} · {}? Click confirm to remove it.",
                 format_ledger_date(entry.date),
@@ -1703,17 +1685,17 @@ impl CofferlyApp {
             self.set_status_info(text);
             return;
         }
-        self.remove_edited_confirm = None;
+        self.prompts.dismiss_remove_edited();
 
         let snapshot = self.snapshot_mutation();
         let edit_snapshot = (self.entry_edit.clone(), self.draft.clone());
-        self.confirm_delete_wallet = false;
-        self.confirm_negative_cents = None;
+        self.prompts.dismiss_delete_wallet();
+        self.prompts.dismiss_spend_anyway();
 
         self.selected_wallet_mut()
             .entries
             .remove(session.entry_index);
-        self.undo = Some(PendingUndo::Removed(RemovableEntry {
+        self.prompts.arm_undo(PendingUndo::Removed(RemovableEntry {
             wallet_index: session.wallet_index,
             entry: entry.clone(),
             entry_index: Some(session.entry_index),
@@ -1784,16 +1766,16 @@ impl CofferlyApp {
 
         if input.signed_amount < 0
             && self.edit_would_go_negative(session.entry_index, input.date, input.signed_amount)
-            && self.confirm_negative_cents != Some(input.amount)
+            && !self.prompts.spend_anyway_is(input.amount)
         {
-            self.confirm_negative_cents = Some(input.amount);
+            self.prompts.arm_spend_anyway(input.amount);
             self.set_status_info(format!(
                 "This correction would leave {} below zero at that point in the ledger. Submit again to confirm.",
                 self.selected_wallet().child_name,
             ));
             return;
         }
-        self.confirm_negative_cents = None;
+        self.prompts.dismiss_spend_anyway();
 
         let snapshot = self.snapshot_mutation();
         let previous = session.original.clone();
@@ -1826,7 +1808,7 @@ impl CofferlyApp {
 
         // The undo is set before the save so a failed write restores the old one
         // from the snapshot; the correction session stays open for a retry.
-        self.undo = Some(PendingUndo::Edited(EditedEntry {
+        self.prompts.arm_undo(PendingUndo::Edited(EditedEntry {
             wallet_index: session.wallet_index,
             entry_index: session.entry_index,
             previous,
@@ -1850,7 +1832,7 @@ impl CofferlyApp {
 
     /// Wallet index and amount the pending undo would restore, for the button label.
     fn pending_undo_summary(&self) -> Option<(usize, i64)> {
-        match self.undo.as_ref()? {
+        match self.prompts.undo()? {
             PendingUndo::Removed(removable) => {
                 Some((removable.wallet_index, removable.entry.amount_cents))
             }
@@ -1861,13 +1843,13 @@ impl CofferlyApp {
     }
 
     fn cancel_negative_spend_confirm(&mut self) {
-        if self.confirm_negative_cents.take().is_some() {
+        if self.prompts.take_spend_anyway() {
             self.set_status_info("Spending not recorded.");
         }
     }
 
     fn fill_entry_date_today(&mut self) {
-        self.remove_edited_confirm = None;
+        self.prompts.dismiss_remove_edited();
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
         self.pending_entry_focus = Some(EntryFormField::Date);
     }
@@ -1888,7 +1870,7 @@ impl CofferlyApp {
         self.draft.amount = format_money_input(amount_cents);
         self.draft.description = description;
         self.draft.date_input = format_ledger_date(Local::now().date_naive());
-        self.confirm_negative_cents = None;
+        self.prompts.dismiss_spend_anyway();
         self.pending_entry_focus = Some(EntryFormField::Amount);
     }
 
@@ -1909,8 +1891,7 @@ impl CofferlyApp {
     fn open_settings(&mut self) {
         self.prefill_settings_from_selected();
         self.new_child_name_input.clear();
-        self.confirm_delete_wallet = false;
-        self.pending_backup_overwrite = None;
+        self.prompts.dismiss_for_settings_open();
         self.show_settings = true;
     }
 
@@ -1928,8 +1909,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let Ok(balance) = parse_dollars_to_cents(&self.starting_balance_input) else {
             self.set_status_err("Enter a valid starting balance, like 90, 90.00, or $1,234.56.");
@@ -1994,8 +1974,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let wallet_name = self.selected_wallet().child_name.clone();
         let current = self.selected_wallet().weekly_allowance;
@@ -2069,8 +2048,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let wallet_name = self.selected_wallet().child_name.clone();
         let current = self.selected_wallet().savings_goal_cents;
@@ -2113,8 +2091,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let name = self.child_name_input.trim().to_owned();
         if !valid_child_name(&name) {
@@ -2153,8 +2130,7 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
 
         let name = self.new_child_name_input.trim().to_owned();
         if !valid_child_name(&name) {
@@ -2214,13 +2190,13 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_delete_wallet();
 
         let wallet_name = self.selected_wallet().child_name.clone();
         let index = Self::newest_entry_index(&self.selected_wallet().entries);
         if let Some(index) = index {
             let entry = self.selected_wallet_mut().entries.remove(index);
-            self.undo = Some(PendingUndo::Removed(RemovableEntry {
+            self.prompts.arm_undo(PendingUndo::Removed(RemovableEntry {
                 wallet_index: self.selected_wallet,
                 entry: entry.clone(),
                 entry_index: None,
@@ -2247,9 +2223,9 @@ impl CofferlyApp {
             return;
         }
         let snapshot = self.snapshot_mutation();
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_delete_wallet();
 
-        let Some(pending) = self.undo.take() else {
+        let Some(pending) = self.prompts.take_undo() else {
             return;
         };
 
@@ -2320,8 +2296,7 @@ impl CofferlyApp {
         let removed_index = self.selected_wallet;
         self.data.wallets.remove(removed_index);
         self.ledger_filters.remove(&wallet_name);
-        self.undo = None;
-        self.confirm_delete_wallet = false;
+        self.prompts.dismiss_undo_and_delete_wallet();
         if self.selected_wallet >= self.data.wallets.len() {
             self.selected_wallet = self.data.wallets.len() - 1;
         }
@@ -2354,7 +2329,7 @@ impl CofferlyApp {
     /// Copies the on-disk encrypted vault to `dest` byte-for-byte and verifies
     /// it. An existing `dest` is only replaced after the parent confirms.
     pub(crate) fn back_up_vault_to(&mut self, dest: PathBuf, replace_existing: bool) {
-        self.pending_backup_overwrite = None;
+        self.prompts.dismiss_backup_overwrite();
         if !self.can_change("Unlock parent mode to back up the vault.") {
             return;
         }
@@ -2376,7 +2351,7 @@ impl CofferlyApp {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| dest.display().to_string());
-            self.pending_backup_overwrite = Some(dest);
+            self.prompts.arm_backup_overwrite(dest);
             self.set_status_info(format!("{name} already exists. Replace it?"));
             return;
         }
@@ -2393,7 +2368,7 @@ impl CofferlyApp {
     }
 
     pub(crate) fn cancel_backup_overwrite(&mut self) {
-        self.pending_backup_overwrite = None;
+        self.prompts.dismiss_backup_overwrite();
         self.set_status_info("Backup cancelled. The existing file was not changed.");
     }
 
@@ -2555,7 +2530,7 @@ impl CofferlyApp {
             selected_wallet: self.selected_wallet,
             ledger_filter: self.ledger_filter.clone(),
             ledger_filters: self.ledger_filters.clone(),
-            undo: self.undo.clone(),
+            undo: self.prompts.undo().cloned(),
             new_child_name_input: self.new_child_name_input.clone(),
         }
     }
@@ -2586,7 +2561,7 @@ impl CofferlyApp {
         self.selected_wallet = snapshot.selected_wallet;
         self.ledger_filter = snapshot.ledger_filter;
         self.ledger_filters = snapshot.ledger_filters;
-        self.undo = snapshot.undo;
+        self.prompts.restore_undo(snapshot.undo);
         self.new_child_name_input = snapshot.new_child_name_input;
         // Re-derive the settings fields from the restored wallet so
         // Save buttons stay off and the fields match the ledger again.

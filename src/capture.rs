@@ -329,7 +329,7 @@ fn prepare_wallet(app: &mut CofferlyApp, show_settings: bool) {
     app.lock_mode = LockMode::Story;
     app.pending_story = None;
     app.show_settings = show_settings;
-    app.confirm_delete_wallet = false;
+    app.prompts.dismiss_delete_wallet();
     app.status = Status::info("Parent mode unlocked.");
     app.starting_balance_input = format_money_input(app.data.wallets[1].starting_balance_cents);
     app.new_child_name_input.clear();
