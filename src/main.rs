@@ -80,7 +80,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct EntryDraft {
     description: String,
     amount: String,
@@ -1612,8 +1612,14 @@ impl CofferlyApp {
 
         self.prompts.dismiss_delete_wallet();
         self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
 
-        let stashed_draft = self.draft.clone();
+        // Mid-correction, `self.draft` holds the open correction's values, so
+        // the real half-typed new entry is the one the session already stashed.
+        let stashed_draft = match &self.entry_edit {
+            Some(open) => open.stashed_draft.clone(),
+            None => self.draft.clone(),
+        };
         self.draft.kind = if entry.amount_cents < 0 {
             EntryKind::Deduction
         } else {
@@ -1649,6 +1655,16 @@ impl CofferlyApp {
         self.set_status_info("Correction cancelled.");
     }
 
+    /// Ends a correction whose entry no longer sits where it was opened,
+    /// writing nothing, and puts the half-typed new entry back.
+    fn end_stale_entry_edit(&mut self, stashed_draft: EntryDraft) {
+        self.entry_edit = None;
+        self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
+        self.draft = stashed_draft;
+        self.set_status_err("That entry changed while you were correcting it.");
+    }
+
     /// Removes the entry being corrected, wherever it sits in the ledger. The
     /// first call arms a confirmation; the second removes. A failed vault write
     /// restores the ledger, the correction session, the form and the old undo.
@@ -1675,6 +1691,10 @@ impl CofferlyApp {
             self.set_status_err("That entry is no longer in the ledger.");
             return;
         };
+        if entry != session.original {
+            self.end_stale_entry_edit(session.stashed_draft);
+            return;
+        }
         let wallet_name = self.selected_wallet().child_name.clone();
 
         if !self.prompts.remove_edited_is(session.entry_index) {
@@ -1759,16 +1779,18 @@ impl CofferlyApp {
             self.cancel_entry_edit();
             return;
         }
-        if self
-            .selected_wallet()
-            .entries
-            .get(session.entry_index)
-            .is_none()
-        {
-            self.entry_edit = None;
-            self.draft = session.stashed_draft;
-            self.set_status_err("That entry is no longer in the ledger.");
-            return;
+        match self.selected_wallet().entries.get(session.entry_index) {
+            None => {
+                self.entry_edit = None;
+                self.draft = session.stashed_draft;
+                self.set_status_err("That entry is no longer in the ledger.");
+                return;
+            }
+            Some(current) if *current != session.original => {
+                self.end_stale_entry_edit(session.stashed_draft);
+                return;
+            }
+            Some(_) => {}
         }
 
         let Some(input) = self.validated_entry_input() else {
@@ -2212,6 +2234,8 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before removing entries.") {
             return;
         }
+        // Positions may shift below, so an open correction can't stay open.
+        self.cancel_entry_edit();
         let snapshot = self.snapshot_mutation();
         self.prompts.dismiss_delete_wallet();
 
@@ -2245,6 +2269,8 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before undoing.") {
             return;
         }
+        // Positions may shift below, so an open correction can't stay open.
+        self.cancel_entry_edit();
         let snapshot = self.snapshot_mutation();
         self.prompts.dismiss_delete_wallet();
 

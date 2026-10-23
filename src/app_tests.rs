@@ -494,6 +494,49 @@ fn cancelling_a_correction_restores_the_half_typed_new_entry() {
 }
 
 #[test]
+fn switching_corrections_then_cancelling_restores_the_original_draft() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Half-typed".to_owned();
+    app.draft.amount = "7".to_owned();
+    let original = app.draft.clone();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(0);
+    app.begin_entry_edit(1);
+    assert_eq!(app.entry_edit.as_ref().map(|s| s.entry_index), Some(1));
+    app.cancel_entry_edit();
+
+    assert_eq!(app.draft, original);
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+}
+
+#[test]
+fn switching_corrections_then_saving_restores_the_original_draft() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Half-typed".to_owned();
+    app.draft.amount = "7".to_owned();
+    let original = app.draft.clone();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(0);
+    app.begin_entry_edit(2);
+    assert_eq!(app.selected_wallet().entries, before, "nothing written yet");
+    app.draft.description = "Birthday cash".to_owned();
+    app.commit_entry_edit();
+
+    assert_eq!(
+        app.selected_wallet().entries[2].description,
+        "Birthday cash"
+    );
+    assert_eq!(app.selected_wallet().entries[0], before[0]);
+    assert_eq!(app.draft, original);
+    assert!(app.entry_edit.is_none());
+}
+
+#[test]
 fn a_locked_parent_cannot_start_or_commit_a_correction() {
     let (mut app, _dir) = app_with_entries();
     app.parent_unlocked = false;
@@ -3616,4 +3659,128 @@ fn refresh_draft_date_leaves_an_open_correction_alone() {
     app.refresh_draft_date_on(day(2030, 1, 1));
 
     assert_eq!(app.draft.date_input, loaded);
+}
+
+// --- #252: Settings removals must not retarget an open correction -------
+
+/// Newest-by-date entry sits at position 0, so removing it shifts the rest.
+fn app_with_newest_entry_first() -> (CofferlyApp, TempDir) {
+    let (mut app, dir) = test_app();
+    let entry = |m, d, text: &str, cents| Entry {
+        date: NaiveDate::from_ymd_opt(2026, m, d).unwrap(),
+        description: text.to_owned(),
+        amount_cents: cents,
+    };
+    app.data.wallets[0].starting_balance_cents = 5_000;
+    app.data.wallets[0].entries = vec![
+        entry(10, 5, "Gift", 2_000),
+        entry(9, 1, "Snack", -200),
+        entry(9, 2, "Bus", -300),
+    ];
+    app.invalidate_ledger_cache();
+    app.save_with_success_or_restore("saved".to_owned(), app.snapshot_mutation());
+    (app, dir)
+}
+
+fn open_snack_correction(app: &mut CofferlyApp) {
+    app.draft.description = "half typed".to_owned();
+    app.begin_entry_edit(1);
+    app.draft.amount = "2.50".to_owned();
+}
+
+fn assert_correction_closed_and_bus_intact(app: &CofferlyApp) {
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft.description, "half typed");
+    assert!(app
+        .selected_wallet()
+        .entries
+        .iter()
+        .any(|e| e.description == "Bus" && e.amount_cents == -300));
+    let saved = saved_data(app, "1234");
+    assert!(saved.wallets[0]
+        .entries
+        .iter()
+        .any(|e| e.description == "Bus" && e.amount_cents == -300));
+}
+
+#[test]
+fn removing_latest_entry_closes_an_open_correction() {
+    let (mut app, _dir) = app_with_newest_entry_first();
+    open_snack_correction(&mut app);
+
+    app.remove_latest_entry();
+    assert_correction_closed_and_bus_intact(&app);
+    app.commit_entry_edit();
+    assert_correction_closed_and_bus_intact(&app);
+    let entries = &app.selected_wallet().entries;
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].description, "Snack");
+    assert_eq!(entries[0].amount_cents, -200);
+    assert_eq!(entries[1].description, "Bus");
+}
+
+#[test]
+fn undoing_a_removal_closes_an_open_correction() {
+    let (mut app, _dir) = app_with_newest_entry_first();
+    app.remove_latest_entry();
+    app.draft.description = "half typed".to_owned();
+    app.begin_entry_edit(0);
+
+    app.undo_remove_entry();
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft.description, "half typed");
+    let entries = &app.selected_wallet().entries;
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].description, "Snack");
+    assert_eq!(entries[0].amount_cents, -200);
+    assert_eq!(entries[1].description, "Bus");
+    assert_eq!(entries[1].amount_cents, -300);
+    assert_eq!(saved_data(&app, "1234").wallets[0].entries, *entries);
+}
+
+#[test]
+fn undoing_a_correction_closes_an_open_correction() {
+    let (mut app, _dir) = app_with_newest_entry_first();
+    app.begin_entry_edit(2);
+    app.draft.amount = "4.00".to_owned();
+    app.commit_entry_edit();
+    app.draft.description = "half typed".to_owned();
+    app.begin_entry_edit(1);
+
+    app.undo_remove_entry();
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft.description, "half typed");
+    let entries = &app.selected_wallet().entries;
+    assert_eq!(entries[1].amount_cents, -200);
+    assert_eq!(entries[2].amount_cents, -300);
+    assert_eq!(saved_data(&app, "1234").wallets[0].entries, *entries);
+}
+
+#[test]
+fn stale_correction_writes_nothing() {
+    let (mut app, _dir) = app_with_newest_entry_first();
+    open_snack_correction(&mut app);
+    // Shift positions behind the session's back.
+    app.data.wallets[0].entries.remove(0);
+    app.invalidate_ledger_cache();
+    let before = app.selected_wallet().entries.clone();
+    let disk_before = std::fs::read(&app.data_path).unwrap();
+
+    app.commit_entry_edit();
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+    assert!(app
+        .status
+        .text
+        .contains("changed while you were correcting"));
+    assert_eq!(std::fs::read(&app.data_path).unwrap(), disk_before);
+
+    open_snack_correction(&mut app);
+    app.data.wallets[0].entries.swap(0, 1);
+    let before = app.selected_wallet().entries.clone();
+    app.remove_edited_entry();
+    app.remove_edited_entry();
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+    assert_eq!(std::fs::read(&app.data_path).unwrap(), disk_before);
 }
