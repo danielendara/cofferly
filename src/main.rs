@@ -80,7 +80,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct EntryDraft {
     description: String,
     amount: String,
@@ -1602,8 +1602,14 @@ impl CofferlyApp {
 
         self.prompts.dismiss_delete_wallet();
         self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
 
-        let stashed_draft = self.draft.clone();
+        // Mid-correction, `self.draft` holds the open correction's values, so
+        // the real half-typed new entry is the one the session already stashed.
+        let stashed_draft = match &self.entry_edit {
+            Some(open) => open.stashed_draft.clone(),
+            None => self.draft.clone(),
+        };
         self.draft.kind = if entry.amount_cents < 0 {
             EntryKind::Deduction
         } else {
