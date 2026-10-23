@@ -494,6 +494,49 @@ fn cancelling_a_correction_restores_the_half_typed_new_entry() {
 }
 
 #[test]
+fn switching_corrections_then_cancelling_restores_the_original_draft() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Half-typed".to_owned();
+    app.draft.amount = "7".to_owned();
+    let original = app.draft.clone();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(0);
+    app.begin_entry_edit(1);
+    assert_eq!(app.entry_edit.as_ref().map(|s| s.entry_index), Some(1));
+    app.cancel_entry_edit();
+
+    assert_eq!(app.draft, original);
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.selected_wallet().entries, before);
+}
+
+#[test]
+fn switching_corrections_then_saving_restores_the_original_draft() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Half-typed".to_owned();
+    app.draft.amount = "7".to_owned();
+    let original = app.draft.clone();
+    let before = app.selected_wallet().entries.clone();
+
+    app.begin_entry_edit(0);
+    app.begin_entry_edit(2);
+    assert_eq!(app.selected_wallet().entries, before, "nothing written yet");
+    app.draft.description = "Birthday cash".to_owned();
+    app.commit_entry_edit();
+
+    assert_eq!(
+        app.selected_wallet().entries[2].description,
+        "Birthday cash"
+    );
+    assert_eq!(app.selected_wallet().entries[0], before[0]);
+    assert_eq!(app.draft, original);
+    assert!(app.entry_edit.is_none());
+}
+
+#[test]
 fn a_locked_parent_cannot_start_or_commit_a_correction() {
     let (mut app, _dir) = app_with_entries();
     app.parent_unlocked = false;
