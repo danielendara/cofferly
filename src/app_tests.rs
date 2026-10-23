@@ -3580,3 +3580,40 @@ fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
     assert_eq!(restore_ui_state(Some(&storage), 9).wallet_index, 7);
     assert_eq!(restore_ui_state(Some(&storage), 0).wallet_index, 0);
 }
+
+fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, m, d).unwrap()
+}
+
+#[test]
+fn auto_filled_entry_date_follows_the_next_day_on_unlock() {
+    let (mut app, _dir) = test_app();
+    app.draft.fill_today(day(2026, 9, 1));
+
+    let session = SessionCrypto::establish("pin").unwrap();
+    app.apply_unlock_on(default_app_data(), session, day(2026, 9, 2));
+
+    assert_eq!(app.draft.date_input, format_ledger_date(day(2026, 9, 2)));
+}
+
+#[test]
+fn refresh_draft_date_leaves_a_typed_date_alone() {
+    let (mut app, _dir) = test_app();
+    app.draft.fill_today(day(2026, 9, 1));
+    app.draft.date_input = format_ledger_date(day(2026, 8, 20));
+
+    app.refresh_draft_date_on(day(2026, 9, 2));
+
+    assert_eq!(app.draft.date_input, format_ledger_date(day(2026, 8, 20)));
+}
+
+#[test]
+fn refresh_draft_date_leaves_an_open_correction_alone() {
+    let (mut app, _dir) = app_with_entries();
+    app.begin_entry_edit(1);
+    let loaded = app.draft.date_input.clone();
+
+    app.refresh_draft_date_on(day(2030, 1, 1));
+
+    assert_eq!(app.draft.date_input, loaded);
+}
