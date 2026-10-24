@@ -1,9 +1,5 @@
 //! Rendering of the app's screens: the lock / Coffer Story (and legacy PIN) flows, the wallet header,
 //! the entry form, the ledger table, and the settings window.
-//!
-//! `CofferlyApp` is defined in `main.rs`; its screen-rendering methods live in
-//! the `impl` block below. Field privacy is unaffected because both modules are
-//! in the same crate as the struct.
 
 use eframe::egui;
 

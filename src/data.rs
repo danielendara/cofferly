@@ -462,11 +462,9 @@ impl Wallet {
 
     /// The most recently recorded deposit, for "Repeat last deposit" prefill.
     ///
-    /// Entries don't carry their own `EntryKind` tag; a deposit is any entry
-    /// with a positive `amount_cents` (deductions are stored negative -- see
-    /// `add_entry`'s `signed_amount`). Newest is chosen by date, tie-broken by
-    /// list index (the entry added later wins), matching the ordering
-    /// `ledger_rows_sorted` uses for `LedgerSort::NewestFirst`.
+    /// A deposit is any entry with a positive `amount_cents`. Newest is chosen
+    /// by date, tie-broken by list index (the entry added later wins), matching
+    /// the ordering `ledger_rows_sorted` uses for `LedgerSort::NewestFirst`.
     pub fn latest_deposit(&self) -> Option<&Entry> {
         self.entries
             .iter()
@@ -534,7 +532,7 @@ pub fn default_app_data() -> AppData {
     }
 }
 
-pub fn default_wallets() -> Vec<Wallet> {
+fn default_wallets() -> Vec<Wallet> {
     DEFAULT_CHILD_NAMES
         .iter()
         .map(|name| Wallet {
@@ -567,7 +565,7 @@ pub fn normalize_app_data(mut data: AppData) -> Option<AppData> {
     Some(data)
 }
 
-pub fn valid_pin(pin: &str) -> bool {
+fn valid_pin(pin: &str) -> bool {
     pin.len() == 4 && pin.chars().all(|character| character.is_ascii_digit())
 }
 
@@ -591,7 +589,7 @@ pub fn valid_description(desc: &str) -> bool {
     !trimmed.is_empty() && trimmed.chars().count() <= MAX_DESCRIPTION_CHARS
 }
 
-pub fn description_char_count(desc: &str) -> usize {
+fn description_char_count(desc: &str) -> usize {
     desc.chars().count()
 }
 
