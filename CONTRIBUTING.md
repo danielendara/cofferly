@@ -13,25 +13,21 @@ Cofferly is a maintainer-led family app. The repository is public so people can 
 
 ## Local Development
 
-```powershell
-cargo fmt -- --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
-cargo llvm-cov --locked --fail-under-lines 74 --ignore-filename-regex '(^|/)src/(views|capture)\.rs$'
-cargo audit
-cargo build --release --locked
+Run the full local gate before opening a pull request:
+
+```bash
+scripts/verify.sh
 ```
 
-Do not commit `vault.cofferly`, `data.json`, or `.env` files. CI runs `scripts/check-vault-paths.sh` on Linux.
+That script runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, formatting, clippy, typecheck, unit tests, the coverage floor, and the GUI smoke capture. Do not commit `vault.cofferly`, `data.json`, or `.env` files.
 
 If `cargo` is not on PATH on Windows, add `%USERPROFILE%\.cargo\bin` to PATH or run Cargo from that folder.
 
-CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `cargo fmt`, `cargo clippy`, and `scripts/check-vault-paths.sh`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**). The **Coverage** job is informational and is not merge-blocking.
+GitHub Actions CI is necessary but not sufficient: it does not run the full `scripts/verify.sh` gate (for example, no merge-blocking coverage floor or GUI smoke on every PR). CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, `cargo fmt`, and `cargo clippy`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**). The **Coverage** job is informational and is not merge-blocking.
 
 ## Pull Request Checklist
 
-- Formatting and clippy pass.
-- Tests pass.
+- `scripts/verify.sh` passes locally.
 - The app still opens to the Coffer Story (or Legacy PIN migration) unlock screen.
 - Public files do not contain real child names or private family data.
 - README or release docs are updated when behavior changes.

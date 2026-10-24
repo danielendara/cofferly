@@ -4,7 +4,7 @@ Describe the change and why it belongs in Cofferly.
 
 ## Checklist
 
-- [ ] I ran the [local checks in CONTRIBUTING.md](../CONTRIBUTING.md#local-development) (at minimum `cargo fmt -- --check`, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --locked`).
+- [ ] I ran [`scripts/verify.sh`](../scripts/verify.sh) locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#local-development)); green CI is necessary but not sufficient.
 - [ ] I did not include real child names, private ledger data, or family screenshots.
 - [ ] I updated docs if behavior changed.
 
