@@ -80,12 +80,15 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct EntryDraft {
     description: String,
     amount: String,
     kind: EntryKind,
     date_input: String,
+    /// The day `date_input` was auto-filled with, while it still holds that
+    /// untouched value; `None` once the date is a typed or loaded one.
+    auto_date: Option<NaiveDate>,
 }
 
 impl EntryDraft {
@@ -95,7 +98,13 @@ impl EntryDraft {
             amount: String::new(),
             kind: EntryKind::Deduction,
             date_input: format_ledger_date(Local::now().date_naive()),
+            auto_date: Some(Local::now().date_naive()),
         }
+    }
+
+    fn fill_today(&mut self, today: NaiveDate) {
+        self.date_input = format_ledger_date(today);
+        self.auto_date = Some(today);
     }
 }
 
@@ -840,6 +849,7 @@ impl CofferlyApp {
         self.invalidate_ledger_cache();
         self.touch_interaction();
         self.reset_pin_failures();
+        self.refresh_draft_date_on(today);
         if legacy {
             self.lock_mode = LockMode::MigrateReveal;
             self.pending_story = story::generate().ok();
@@ -1580,7 +1590,7 @@ impl CofferlyApp {
 
         self.draft.description.clear();
         self.draft.amount.clear();
-        self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        self.draft.fill_today(Local::now().date_naive());
         // Same focus path as validation failures — lands the parent back in
         // Description for rapid multi-entry logging instead of wherever
         // focus happened to be.
@@ -1602,8 +1612,14 @@ impl CofferlyApp {
 
         self.prompts.dismiss_delete_wallet();
         self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
 
-        let stashed_draft = self.draft.clone();
+        // Mid-correction, `self.draft` holds the open correction's values, so
+        // the real half-typed new entry is the one the session already stashed.
+        let stashed_draft = match &self.entry_edit {
+            Some(open) => open.stashed_draft.clone(),
+            None => self.draft.clone(),
+        };
         self.draft.kind = if entry.amount_cents < 0 {
             EntryKind::Deduction
         } else {
@@ -1612,6 +1628,7 @@ impl CofferlyApp {
         self.draft.amount = format_money_input(entry.amount_cents.abs());
         self.draft.description = entry.description.clone();
         self.draft.date_input = format_ledger_date(entry.date);
+        self.draft.auto_date = None;
 
         self.entry_edit = Some(EntryEditSession {
             wallet_index: self.selected_wallet,
@@ -1636,6 +1653,16 @@ impl CofferlyApp {
         self.prompts.dismiss_remove_edited();
         self.pending_ledger_edit_focus = Some(session.entry_index);
         self.set_status_info("Correction cancelled.");
+    }
+
+    /// Ends a correction whose entry no longer sits where it was opened,
+    /// writing nothing, and puts the half-typed new entry back.
+    fn end_stale_entry_edit(&mut self, stashed_draft: EntryDraft) {
+        self.entry_edit = None;
+        self.prompts.dismiss_spend_anyway();
+        self.prompts.dismiss_remove_edited();
+        self.draft = stashed_draft;
+        self.set_status_err("That entry changed while you were correcting it.");
     }
 
     /// Removes the entry being corrected, wherever it sits in the ledger. The
@@ -1664,6 +1691,10 @@ impl CofferlyApp {
             self.set_status_err("That entry is no longer in the ledger.");
             return;
         };
+        if entry != session.original {
+            self.end_stale_entry_edit(session.stashed_draft);
+            return;
+        }
         let wallet_name = self.selected_wallet().child_name.clone();
 
         if !self.prompts.remove_edited_is(session.entry_index) {
@@ -1748,16 +1779,18 @@ impl CofferlyApp {
             self.cancel_entry_edit();
             return;
         }
-        if self
-            .selected_wallet()
-            .entries
-            .get(session.entry_index)
-            .is_none()
-        {
-            self.entry_edit = None;
-            self.draft = session.stashed_draft;
-            self.set_status_err("That entry is no longer in the ledger.");
-            return;
+        match self.selected_wallet().entries.get(session.entry_index) {
+            None => {
+                self.entry_edit = None;
+                self.draft = session.stashed_draft;
+                self.set_status_err("That entry is no longer in the ledger.");
+                return;
+            }
+            Some(current) if *current != session.original => {
+                self.end_stale_entry_edit(session.stashed_draft);
+                return;
+            }
+            Some(_) => {}
         }
 
         let Some(input) = self.validated_entry_input() else {
@@ -1848,9 +1881,21 @@ impl CofferlyApp {
         }
     }
 
+    /// Moves an auto-filled, untouched entry date forward when the local day
+    /// has changed (app left open overnight). A typed date or one loaded for
+    /// a correction is never overwritten.
+    fn refresh_draft_date_on(&mut self, today: NaiveDate) {
+        let Some(filled) = self.draft.auto_date else {
+            return;
+        };
+        if filled != today && self.draft.date_input == format_ledger_date(filled) {
+            self.draft.fill_today(today);
+        }
+    }
+
     fn fill_entry_date_today(&mut self) {
         self.prompts.dismiss_remove_edited();
-        self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        self.draft.fill_today(Local::now().date_naive());
         self.pending_entry_focus = Some(EntryFormField::Date);
     }
 
@@ -1869,7 +1914,7 @@ impl CofferlyApp {
         self.draft.kind = EntryKind::Deposit;
         self.draft.amount = format_money_input(amount_cents);
         self.draft.description = description;
-        self.draft.date_input = format_ledger_date(Local::now().date_naive());
+        self.draft.fill_today(Local::now().date_naive());
         self.prompts.dismiss_spend_anyway();
         self.pending_entry_focus = Some(EntryFormField::Amount);
     }
@@ -2189,6 +2234,8 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before removing entries.") {
             return;
         }
+        // Positions may shift below, so an open correction can't stay open.
+        self.cancel_entry_edit();
         let snapshot = self.snapshot_mutation();
         self.prompts.dismiss_delete_wallet();
 
@@ -2222,6 +2269,8 @@ impl CofferlyApp {
         if !self.can_change("Unlock parent mode before undoing.") {
             return;
         }
+        // Positions may shift below, so an open correction can't stay open.
+        self.cancel_entry_edit();
         let snapshot = self.snapshot_mutation();
         self.prompts.dismiss_delete_wallet();
 
@@ -2632,6 +2681,7 @@ impl eframe::App for CofferlyApp {
         }
         self.note_input_activity(&ctx);
         self.poll_unlock(&ctx);
+        self.refresh_draft_date_on(Local::now().date_naive());
         if self.capture.is_none() {
             self.auto_lock_if_idle(&ctx);
         }
