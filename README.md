@@ -128,7 +128,7 @@ cargo build --release
 On Debian/Ubuntu, install GUI packages before the first build:
 
 ```bash
-sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 ```
 
 The binary is `target/release/Cofferly` (or `Cofferly.exe` on Windows). There is no macOS/Linux installer yet; run the release binary from that path.
