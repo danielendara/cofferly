@@ -3169,8 +3169,7 @@ fn next_wallet_index(current: usize, count: usize, delta: isize) -> usize {
         let step = usize::try_from(delta).unwrap_or(usize::MAX);
         current.saturating_add(step).min(max_index)
     } else {
-        let step = usize::try_from(-delta).unwrap_or(usize::MAX);
-        current.saturating_sub(step)
+        current.saturating_sub(delta.unsigned_abs()).min(max_index)
     }
 }
 
