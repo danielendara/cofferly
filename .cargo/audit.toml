@@ -1,0 +1,4 @@
+# Advisory ignores for `cargo audit` (local verify and CI via rustsec/audit-check).
+# Keep in sync with `.github/workflows/ci.yml` audit job (`ignore:` input); today none.
+[advisories]
+ignore = []

@@ -10,8 +10,9 @@ Cofferly: local-only allowance wallet for kids. Rust + eframe/egui desktop app, 
 - Docs self-check: `scripts/check-docs.sh`
 - Coverage gate: `cargo llvm-cov --locked --fail-under-lines 74 --ignore-filename-regex '(^|/)src/(views|capture)\.rs$'`
 - Vault guard: `scripts/check-vault-paths.sh`
+- Security audit: `cargo audit` (needs `cargo install cargo-audit --locked` and network to fetch/update the RustSec advisory DB). Accepted advisory ignores live only in `.cargo/audit.toml` (must match the CI `audit` job). To triage a new failure: prefer updating `Cargo.lock`/dependencies; if an ignore is truly warranted, add the `RUSTSEC-…` id to `[advisories] ignore` in `.cargo/audit.toml` with a short comment in the PR, and keep CI in sync.
 - E2E: none exist; the GUI smoke is the app's capture mode (`COFFERLY_CAPTURE`) under `xvfb-run`, wired into verify.
-- **Verify entrypoint (run before every PR): `scripts/verify.sh`** Runs all of the above fail-fast, plus a docs self-check and the GUI smoke. GitHub Actions CI (`.github/workflows/ci.yml`) is live on this public repo; it must also be green on the PR.
+- **Verify entrypoint (run before every PR): `scripts/verify.sh`** Runs all of the above fail-fast, plus a docs self-check, `cargo audit`, and the GUI smoke. GitHub Actions CI (`.github/workflows/ci.yml`) is live on this public repo; it must also be green on the PR.
 - Drive the real app: see `.cursor/skills/verify-cofferly/SKILL.md`.
 
 ## Proof required in PRs
