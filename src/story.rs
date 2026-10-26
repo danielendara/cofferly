@@ -50,13 +50,14 @@ fn sample_below(
     next_u64: &mut impl FnMut() -> Result<u64, String>,
 ) -> Result<usize, String> {
     debug_assert!(upper > 0);
-    let upper = upper as u64;
+    let upper = u64::try_from(upper).map_err(|_| "sample range out of bounds".to_owned())?;
     // Reject the short tail so modulo reduction remains exactly uniform.
     let accepted_end = u64::MAX - (u64::MAX % upper);
     loop {
         let value = next_u64()?;
         if value < accepted_end {
-            return Ok((value % upper) as usize);
+            return usize::try_from(value % upper)
+                .map_err(|_| "sample index out of bounds".to_owned());
         }
     }
 }

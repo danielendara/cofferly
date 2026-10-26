@@ -461,13 +461,12 @@ impl CofferlyApp {
                                 self.remove_last_story_selection();
                             }
                             match self.lock_mode {
-                                LockMode::SetupConfirm => {
+                                LockMode::SetupConfirm
                                     if ui
                                         .add_enabled(!self.unlocking, egui::Button::new("Back"))
-                                        .clicked()
-                                    {
-                                        self.back_to_story_reveal();
-                                    }
+                                        .clicked() =>
+                                {
+                                    self.back_to_story_reveal();
                                 }
                                 LockMode::MigrateConfirm => {
                                     if ui

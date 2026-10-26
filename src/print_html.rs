@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -39,22 +40,24 @@ pub fn write_printable_ledger_filtered(
             printed
         );
         if let Some(progress) = wallet.savings_goal_progress() {
-            header.push_str(&format!(
+            let _ = write!(
+                header,
                 "<p class=\"goal\">Savings goal: {}</p>",
                 escape_html(&progress.label())
-            ));
+            );
         }
         body.push_str(&header);
 
         let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
         let summary = ledger_filter_summary(&owned_rows, description_filter);
         if !description_filter.trim().is_empty() {
-            body.push_str(&format!(
+            let _ = write!(
+                body,
                 "<p class=\"filter\" style=\"font-size: 14px; margin: -10px 0 18px;\">Showing {} of {} entries matching “{}”. Balances include every entry.</p>",
                 summary.matching_entry_count,
                 wallet.entries.len(),
                 escape_html(description_filter.trim())
-            ));
+            );
         }
 
         body.push_str(

@@ -83,7 +83,14 @@ impl SavingsGoalProgress {
         } else if reached {
             1.0
         } else {
-            ((balance_cents as f64 / goal_cents as f64).clamp(0.0, 1.0)) as f32
+            // Progress bar only; f32 precision is enough for display.
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "savings goal progress bar; f32 precision is enough"
+            )]
+            {
+                ((balance_cents as f64 / goal_cents as f64).clamp(0.0, 1.0)) as f32
+            }
         };
         let remaining_cents = if reached {
             0
@@ -432,7 +439,7 @@ impl Wallet {
         }
 
         let first_week = (weeks_due - MAX_ALLOWANCE_CATCH_UP_WEEKS).max(0) + 1;
-        let skipped_weeks = (first_week - 1) as usize;
+        let skipped_weeks = usize::try_from(first_week - 1).unwrap_or(usize::MAX);
         let mut last_posted = allowance.last_posted;
         for week in first_week..=weeks_due {
             let date = allowance.last_posted + chrono::Duration::weeks(week);

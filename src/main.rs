@@ -2,6 +2,7 @@ use chrono::{Local, NaiveDate};
 use eframe::egui;
 use eframe::egui::Color32;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -402,11 +403,21 @@ fn run_story_setup(
                 Err(_) => return Err(StorySetupError::Establish),
             };
             match io::save_encrypted(data_path, data, secret, &mut session_opt) {
-                Ok(encrypted) => Ok(StorySetupSuccess {
-                    session: session_opt.unwrap(),
-                    encrypted,
-                    lock_mode,
-                }),
+                Ok(encrypted) => {
+                    let session = match session_opt {
+                        Some(session) => session,
+                        None => {
+                            return Err(StorySetupError::SaveFresh {
+                                message: "Session missing after save.".into(),
+                            });
+                        }
+                    };
+                    Ok(StorySetupSuccess {
+                        session,
+                        encrypted,
+                        lock_mode,
+                    })
+                }
                 Err(message) => Err(StorySetupError::SaveFresh { message }),
             }
         }
@@ -420,11 +431,22 @@ fn run_story_setup(
             }
             let mut session_opt = Some(session);
             match io::save_encrypted(data_path, data, secret, &mut session_opt) {
-                Ok(encrypted) => Ok(StorySetupSuccess {
-                    session: session_opt.unwrap(),
-                    encrypted,
-                    lock_mode,
-                }),
+                Ok(encrypted) => {
+                    let session = match session_opt {
+                        Some(session) => session,
+                        None => {
+                            return Err(StorySetupError::SaveRewrap {
+                                lock_mode,
+                                message: "Session missing after save.".into(),
+                            });
+                        }
+                    };
+                    Ok(StorySetupSuccess {
+                        session,
+                        encrypted,
+                        lock_mode,
+                    })
+                }
                 Err(message) => Err(StorySetupError::SaveRewrap { lock_mode, message }),
             }
         }
@@ -587,19 +609,19 @@ impl CofferlyApp {
     fn cached_ledger_rows(&mut self) -> Arc<[OwnedLedgerRow]> {
         let wallet_index = self.selected_wallet;
         let sort = self.ledger_sort;
-        let needs_rebuild = match &self.ledger_cache {
-            Some((idx, cached_sort, _)) => *idx != wallet_index || *cached_sort != sort,
-            None => true,
-        };
 
-        if needs_rebuild {
-            let rows: Arc<[OwnedLedgerRow]> = self.data.wallets[wallet_index]
-                .ledger_rows_sorted_owned(sort)
-                .into();
-            self.ledger_cache = Some((wallet_index, sort, rows));
+        match &self.ledger_cache {
+            Some((idx, cached_sort, rows)) if *idx == wallet_index && *cached_sort == sort => {
+                rows.clone()
+            }
+            _ => {
+                let rows: Arc<[OwnedLedgerRow]> = self.data.wallets[wallet_index]
+                    .ledger_rows_sorted_owned(sort)
+                    .into();
+                self.ledger_cache = Some((wallet_index, sort, rows.clone()));
+                rows
+            }
         }
-
-        self.ledger_cache.as_ref().unwrap().2.clone()
     }
 
     fn selected_wallet(&self) -> &Wallet {
@@ -1709,9 +1731,10 @@ impl CofferlyApp {
                 .selected_wallet()
                 .goes_negative_without(session.entry_index)
             {
-                text.push_str(&format!(
+                let _ = write!(
+                    text,
                     " Removing it would leave {wallet_name} below zero later in the ledger."
-                ));
+                );
             }
             self.set_status_info(text);
             return;
@@ -3141,7 +3164,14 @@ fn next_wallet_index(current: usize, count: usize, delta: isize) -> usize {
     if count == 0 {
         return 0;
     }
-    (current as isize + delta).clamp(0, (count - 1) as isize) as usize
+    let max_index = count - 1;
+    if delta >= 0 {
+        let step = usize::try_from(delta).unwrap_or(usize::MAX);
+        current.saturating_add(step).min(max_index)
+    } else {
+        let step = usize::try_from(-delta).unwrap_or(usize::MAX);
+        current.saturating_sub(step)
+    }
 }
 
 fn wallet_selection_announcement(name: &str, balance_cents: i64) -> String {
@@ -3156,8 +3186,10 @@ fn unlock_cooldown_duration(failed_attempts: u32) -> Duration {
     if failed_attempts <= UNLOCK_GRACE_ATTEMPTS {
         return Duration::ZERO;
     }
-    let index = (failed_attempts - UNLOCK_GRACE_ATTEMPTS - 1)
-        .min(UNLOCK_COOLDOWN_MINUTES.len() as u32 - 1) as usize;
+    let max_index =
+        u32::try_from(UNLOCK_COOLDOWN_MINUTES.len() - 1).expect("cooldown table is non-empty");
+    let offset = failed_attempts.saturating_sub(UNLOCK_GRACE_ATTEMPTS + 1);
+    let index = usize::try_from(offset.min(max_index)).unwrap_or(0);
     Duration::from_secs(UNLOCK_COOLDOWN_MINUTES[index] * 60)
 }
 
