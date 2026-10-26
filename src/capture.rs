@@ -347,7 +347,9 @@ fn save_color_image(image: &Arc<ColorImage>, path: &Path) -> Result<(), String> 
         rgba.push(pixel.b());
         rgba.push(pixel.a());
     }
-    image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+    let w = u32::try_from(w).map_err(|_| "screenshot width out of range".to_owned())?;
+    let h = u32::try_from(h).map_err(|_| "screenshot height out of range".to_owned())?;
+    image::RgbaImage::from_raw(w, h, rgba)
         .ok_or_else(|| "invalid screenshot buffer".to_owned())?
         .save(path)
         .map_err(|e| e.to_string())

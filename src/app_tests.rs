@@ -1179,6 +1179,10 @@ fn wallet_keyboard_keys_move_to_the_next_and_previous_index() {
     assert_eq!(next_wallet_index(0, 3, 1), 1);
     assert_eq!(next_wallet_index(2, 3, 1), 2);
     assert_eq!(next_wallet_index(0, 3, -1), 0);
+    assert_eq!(next_wallet_index(3, 1, -1), 0);
+    assert_eq!(next_wallet_index(5, 3, -1), 2);
+    assert_eq!(next_wallet_index(0, 3, isize::MIN), 0);
+    assert_eq!(next_wallet_index(2, 3, isize::MAX), 2);
 }
 
 #[test]

@@ -33,6 +33,14 @@ zeroize = { version = "1", features = ["alloc"] }
 [dev-dependencies]
 egui_kittest = { version = "=0.37.0", features = ["eframe"] }
 
+[lints.clippy]
+unwrap_used = "warn"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_possible_wrap = "warn"
+undocumented_unsafe_blocks = "warn"
+allow_attributes_without_reason = "warn"
+
 [profile.release]
 opt-level = 2
 lto = true
