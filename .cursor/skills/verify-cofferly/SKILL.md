@@ -8,7 +8,7 @@ description: Launch and drive the Cofferly desktop app (Rust/egui, encrypted loc
 Surface: native desktop GUI (eframe/egui, wgpu). No server, no ports, no network. Data lives in `$COFFERLY_DATA_DIR/Cofferly/`. GitHub Actions CI (`.github/workflows/ci.yml`) is live; run `scripts/verify.sh` locally before every PR and make sure CI is green too.
 
 ## Full gate
-`scripts/verify.sh` — vault guard, docs self-check, fmt, clippy, check, tests, coverage (>=74%), GUI smoke. Fails fast. Needs `cargo-llvm-cov`, `xvfb-run`. If `cargo` has no default toolchain: `export RUSTUP_TOOLCHAIN=<installed toolchain>`.
+`scripts/verify.sh` — vault guard, docs self-check, fmt, clippy, check, **cargo audit**, tests, coverage (>=74%), GUI smoke. Fails fast. Needs `cargo-audit` (`cargo install cargo-audit --locked`), `cargo-llvm-cov`, `xvfb-run`. The audit step needs network (RustSec advisory DB). If audit fails on a new advisory, update dependencies first; only then add a `RUSTSEC-…` id to `.cargo/audit.toml` (same list CI uses). If `cargo` has no default toolchain: `export RUSTUP_TOOLCHAIN=<installed toolchain>`.
 
 ## Launch
 ```bash
