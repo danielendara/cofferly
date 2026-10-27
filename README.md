@@ -72,6 +72,8 @@ Cofferly starts with `Child 1` and `Child 2` so the public app does not include 
 
 After unlocking parent mode, open **Settings** to rename the selected wallet, update its starting balance, add another child wallet, or delete a wallet. Wallet deletion uses a confirm/cancel step and keeps at least one wallet available.
 
+To fix a mistake, choose **Edit** on a ledger row. The entry form switches to **Correct an entry**, where you can change the amount, description, or date, or **Remove this entry** (with Undo).
+
 Use **Remove latest entry** in Settings to delete the **newest-dated** row for the selected wallet (not necessarily the last one you added when the ledger is backdated). Settings shows a **Next to remove:** preview (date, description, amount) so you know which row will go. The app offers a short undo window before the next change.
 
 ### Weekly allowance

@@ -16,7 +16,7 @@ CI runs [`cargo audit`](https://github.com/rustsec/rustsec) on every pull reques
 
 - **Vulnerabilities** fail the audit job and should be fixed by updating the lockfile or direct dependencies before merge.
 - **Warnings** (for example unmaintained transitive crates such as `ttf-parser` via the font stack) may remain until an upstream egui/eframe release removes them. Do not suppress real vulnerabilities to clear noise; prefer upgrading the parent crate.
-- Locally: `cargo install cargo-audit && cargo audit`.
+- Locally: `cargo install cargo-audit --locked && cargo audit` (also part of `scripts/verify.sh`).
 
 ## Security Scope
 
