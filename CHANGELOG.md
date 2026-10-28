@@ -11,6 +11,15 @@
 - Reject amounts like `1,50` instead of saving them as $150.00; use a period for cents. (#249)
 - Reject entry dates with a two- or three-digit year (e.g. `10/08/26`) instead of saving them as the year 0026. (#217)
 - Roll back a new entry and keep the typed form when the vault save fails, so the ledger never shows an entry that is not on disk. (#213)
+- Roll back every other vault change (wallet edits, removals, Settings changes) when the save fails, so memory always matches the file on disk. (#230)
+- Remove latest entry and its Undo end any open correction first, and a correction refuses to save or remove if its row has changed underneath it. (#252)
+- Switching from one correction to another keeps the half-typed new-entry draft instead of replacing it. (#253)
+- The auto-filled entry date moves to the new day when the app stays open past midnight. (#254)
+
+### Security
+
+- Update `ctutils` to 0.4.5 (RUSTSEC-2026-0385, a timing leak in constant-time helpers used through argon2 and chacha20poly1305). (#260)
+- `scripts/verify.sh` now runs `cargo audit`; accepted advisory ignores live in `.cargo/audit.toml`. (#241)
 
 ### Accessibility
 
@@ -22,6 +31,14 @@
 - Settings shows which entry "Remove latest entry" will remove (date, description, amount), so backdated entries don't cause surprise removals. (#219)
 - Long ledger descriptions are cut off with "…" to fit the Description column, and hovering shows the full text. (#224)
 - The correction form can remove any single ledger entry, not just the latest, and the removal can be undone. (#233)
+
+### Dependencies
+
+- Update eframe, egui_extras, and egui_kittest to egui 0.37 together; Dependabot now groups the egui crates. (#248)
+
+### Tests
+
+- Headless `egui_kittest` UI harness with three driven journeys. (#243)
 
 ## 0.4.0 — 2026-10-06
 

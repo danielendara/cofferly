@@ -19,7 +19,7 @@ Run the full local gate before opening a pull request:
 scripts/verify.sh
 ```
 
-That script runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, formatting, clippy, typecheck, unit tests, the coverage floor, and the GUI smoke capture. Do not commit `vault.cofferly`, `data.json`, or `.env` files.
+That script runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, formatting, clippy, typecheck, `cargo audit` (needs `cargo install cargo-audit --locked` and network access), unit tests, the coverage floor, and the GUI smoke capture. Do not commit `vault.cofferly`, `data.json`, or `.env` files.
 
 If `cargo` is not on PATH on Windows, add `%USERPROFILE%\.cargo\bin` to PATH or run Cargo from that folder.
 
