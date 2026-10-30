@@ -2364,6 +2364,14 @@ impl CofferlyApp {
         }
 
         let snapshot = self.snapshot_mutation();
+        // Positions shift below, so an open correction can't stay open. A
+        // failed write puts the correction and the form back.
+        let ended_edit = self.entry_edit.take().map(|session| {
+            self.prompts.dismiss_spend_anyway();
+            self.prompts.dismiss_remove_edited();
+            let form = std::mem::replace(&mut self.draft, session.stashed_draft.clone());
+            (session, form)
+        });
         let wallet_name = self.selected_wallet().child_name.clone();
         let removed_index = self.selected_wallet;
         self.data.wallets.remove(removed_index);
@@ -2377,7 +2385,14 @@ impl CofferlyApp {
         // name/opening prefills so Save cannot overwrite the remaining kid.
         self.prefill_settings_from_selected();
         self.invalidate_ledger_cache();
-        self.save_with_success_or_restore(format!("Deleted wallet for {wallet_name}."), snapshot);
+        let saved =
+            self.persist_or_restore(format!("Deleted wallet for {wallet_name}."), snapshot, "");
+        if !saved {
+            if let Some((session, form)) = ended_edit {
+                self.entry_edit = Some(session);
+                self.draft = form;
+            }
+        }
     }
 
     /// Settings → "Back up vault…": native save dialog, then a verified copy.
