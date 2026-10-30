@@ -3788,3 +3788,72 @@ fn stale_correction_writes_nothing() {
     assert_eq!(app.selected_wallet().entries, before);
     assert_eq!(std::fs::read(&app.data_path).unwrap(), disk_before);
 }
+
+// --- #266: deleting a wallet ends an open correction --------------------
+
+/// Ana/Ben/Cal, each with the same $5.00 weekly allowance, Ben mid-correction
+/// with a half-typed new entry stashed.
+fn three_wallets_correcting_ben() -> (CofferlyApp, TempDir) {
+    let (mut app, dir) = test_app();
+    let entry = Entry {
+        date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+        description: "Weekly allowance".to_owned(),
+        amount_cents: 500,
+    };
+    let template = app.data.wallets[0].clone();
+    app.data.wallets = ["Ana", "Ben", "Cal"]
+        .into_iter()
+        .map(|name| Wallet {
+            child_name: name.to_owned(),
+            starting_balance_cents: 0,
+            entries: vec![entry.clone()],
+            ..template.clone()
+        })
+        .collect();
+    app.selected_wallet = 1;
+    app.draft.description = "half typed".to_owned();
+    app.begin_entry_edit(0);
+    app.draft.amount = "7.00".to_owned();
+    (app, dir)
+}
+
+fn all_entries(app: &CofferlyApp) -> Vec<Vec<Entry>> {
+    app.data.wallets.iter().map(|w| w.entries.clone()).collect()
+}
+
+#[test]
+fn deleting_a_wallet_ends_an_open_correction() {
+    let (mut app, _dir) = three_wallets_correcting_ben();
+    app.selected_wallet = 0;
+    app.delete_selected_wallet();
+    assert_eq!(app.data.wallets.len(), 2);
+    app.selected_wallet = 1; // Cal
+
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft.description, "half typed");
+    let before = all_entries(&app);
+
+    app.commit_entry_edit();
+    app.remove_edited_entry();
+    app.remove_edited_entry();
+
+    assert_eq!(all_entries(&app), before);
+    assert_eq!(app.data.wallets[1].entries[0].amount_cents, 500);
+}
+
+#[test]
+fn deleting_a_wallet_write_failure_keeps_the_open_correction() {
+    let (mut app, dir) = three_wallets_correcting_ben();
+    app.selected_wallet = 0;
+    let before_data = data_snapshot(&app);
+    app.data_path = unwritable_data_path(&dir);
+
+    app.delete_selected_wallet();
+
+    assert_eq!(app.status.severity, StatusSeverity::Error);
+    assert_eq!(data_snapshot(&app), before_data);
+    let session = app.entry_edit.as_ref().expect("correction restored");
+    assert_eq!((session.wallet_index, session.entry_index), (1, 0));
+    assert_eq!(app.draft.amount, "7.00");
+    assert_eq!(session.stashed_draft.description, "half typed");
+}
