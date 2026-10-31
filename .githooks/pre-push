@@ -1,0 +1,19 @@
+#!/bin/sh
+# Lightweight pre-push gate: format, clippy, unit tests.
+# Enable once per clone: git config core.hooksPath .githooks
+
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root" || exit 1
+
+echo "pre-push: cargo fmt --check"
+cargo fmt -- --check
+
+echo "pre-push: cargo clippy"
+cargo clippy --all-targets --locked -- -D warnings
+
+echo "pre-push: cargo test"
+cargo test --locked
+
+echo "pre-push: OK"
