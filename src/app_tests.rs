@@ -1170,6 +1170,50 @@ fn slash_is_ignored_while_settings_is_open() {
 }
 
 #[test]
+fn escape_cancels_an_open_correction() {
+    let (mut app, _dir) = app_with_entries();
+    app.draft.description = "Comic book".to_owned();
+    app.draft.amount = "4.00".to_owned();
+    let stashed = app.draft.clone();
+
+    app.begin_entry_edit(0);
+    assert_ne!(app.draft.description, stashed.description);
+    let ctx = egui::Context::default();
+    press_key(&ctx, egui::Key::Escape);
+
+    app.handle_entry_form_escape(&ctx);
+
+    assert!(app.entry_edit.is_none());
+    assert_eq!(app.draft, stashed);
+    assert_eq!(app.status.text, "Correction cancelled.");
+    assert_eq!(app.pending_ledger_edit_focus, Some(0));
+    ctx.end_pass().textures_delta.clear();
+}
+
+#[test]
+fn escape_cancels_a_pending_overspend_confirm() {
+    let (mut app, _dir) = test_app();
+    let entry_count = app.selected_wallet().entries.len();
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Comic book".to_owned();
+    app.draft.amount = "$999.00".to_owned();
+    app.add_entry();
+    assert!(app.prompts.spend_anyway_pending());
+
+    let ctx = egui::Context::default();
+    press_key(&ctx, egui::Key::Escape);
+
+    app.handle_entry_form_escape(&ctx);
+
+    assert!(!app.prompts.spend_anyway_pending());
+    assert_eq!(app.status.text, "Spending not recorded.");
+    assert_eq!(app.selected_wallet().entries.len(), entry_count);
+    assert_eq!(app.draft.description, "Comic book");
+    assert_eq!(app.draft.amount, "$999.00");
+    ctx.end_pass().textures_delta.clear();
+}
+
+#[test]
 fn wallet_keyboard_keys_move_to_the_next_and_previous_index() {
     assert_eq!(wallet_keyboard_delta(egui::Key::ArrowDown), Some(1));
     assert_eq!(wallet_keyboard_delta(egui::Key::CloseBracket), Some(1));
