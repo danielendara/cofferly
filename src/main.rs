@@ -704,7 +704,7 @@ impl CofferlyApp {
         if self.entry_edit.is_none() && !self.prompts.spend_anyway_pending() {
             return;
         }
-        if ctx.memory(|m| m.focused()) == Some(ledger_filter_id()) {
+        if ctx.memory(|m| m.had_focus_last_frame(ledger_filter_id())) {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
