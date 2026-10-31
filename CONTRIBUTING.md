@@ -13,6 +13,8 @@ Cofferly is a maintainer-led family app. The repository is public so people can 
 
 ## Local Development
 
+Enable the optional pre-push hook once per clone: `git config core.hooksPath .githooks`
+
 Run the full local gate before opening a pull request:
 
 ```bash

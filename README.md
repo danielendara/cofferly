@@ -113,6 +113,8 @@ See [Windows Installer](docs/RELEASE.md#windows-installer) in the release checkl
 
 Install Rust from [rustup.rs](https://rustup.rs).
 
+Optional pre-push checks (format, clippy, tests): `git config core.hooksPath .githooks`
+
 **Windows**
 
 ```powershell
