@@ -1525,6 +1525,7 @@ impl CofferlyApp {
                                 "Cancel"
                             }),
                         )
+                        .on_hover_text("Esc")
                         .clicked();
 
                 let remove_clicked = if editing {
@@ -1617,9 +1618,11 @@ impl CofferlyApp {
             // Esc while the filter is focused clears it AND blurs (rather than just
             // clearing) — leaving it focused-but-empty would make a second Esc a
             // no-op with no visible feedback, and blurring lets `/` cleanly refocus
-            // for a fresh search. Esc elsewhere (entry form, etc.) doesn't reach
-            // here since `filter_response` is this specific widget's own focus.
-            if filter_response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // for a fresh search. egui drops TextEdit focus on Esc before this runs,
+            // so use `had_focus_last_frame`, not `has_focus`.
+            if ui.memory(|m| m.had_focus_last_frame(crate::ledger_filter_id()))
+                && ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
                 self.ledger_filter.clear();
                 filter_response.surrender_focus();
             }

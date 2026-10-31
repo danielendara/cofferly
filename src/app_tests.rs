@@ -1191,6 +1191,43 @@ fn escape_cancels_an_open_correction() {
 }
 
 #[test]
+fn escape_in_focused_ledger_filter_clears_filter_but_keeps_correction_open() {
+    let (mut app, _dir) = app_with_entries();
+    app.ledger_filter = "snack".to_owned();
+    app.begin_entry_edit(0);
+
+    let ctx = egui::Context::default();
+    ctx.begin_pass(egui::RawInput::default());
+    ctx.memory_mut(|memory| memory.request_focus(crate::ledger_filter_id()));
+    ctx.end_pass().textures_delta.clear();
+
+    let escape_input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        ..Default::default()
+    };
+    let output = ctx.run_ui(escape_input, |ui| {
+        app.handle_entry_form_escape(ui.ctx());
+        app.ledger_table(ui);
+    });
+    output.drop_without_applying_deltas();
+
+    assert!(
+        app.entry_edit.is_some(),
+        "Esc in the ledger filter must not cancel an open correction"
+    );
+    assert!(
+        app.ledger_filter.is_empty(),
+        "Esc in the ledger filter must clear the filter text"
+    );
+}
+
+#[test]
 fn escape_cancels_a_pending_overspend_confirm() {
     let (mut app, _dir) = test_app();
     let entry_count = app.selected_wallet().entries.len();
