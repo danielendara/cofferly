@@ -694,6 +694,29 @@ impl CofferlyApp {
         }
     }
 
+    /// Escape backs out of an in-progress correction or a pending overspend
+    /// confirmation — not while Settings is open, and not when the ledger filter
+    /// keeps its own Esc-to-clear.
+    pub(crate) fn handle_entry_form_escape(&mut self, ctx: &egui::Context) {
+        if self.show_settings {
+            return;
+        }
+        if self.entry_edit.is_none() && !self.prompts.spend_anyway_pending() {
+            return;
+        }
+        if ctx.memory(|m| m.focused()) == Some(ledger_filter_id()) {
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if self.entry_edit.is_some() {
+                self.cancel_entry_edit();
+            } else {
+                self.cancel_negative_spend_confirm();
+                self.pending_entry_focus = Some(EntryFormField::Amount);
+            }
+        }
+    }
+
     fn apply_wallet_keyboard_delta(&mut self, delta: isize) {
         let next = next_wallet_index(self.selected_wallet, self.data.wallets.len(), delta);
         if next == self.selected_wallet {
@@ -2731,6 +2754,7 @@ impl eframe::App for CofferlyApp {
 
         self.handle_wallet_keyboard_nav(&ctx);
         self.handle_ledger_filter_shortcut(&ctx);
+        self.handle_entry_form_escape(&ctx);
 
         egui::Panel::top("header")
             .frame(
