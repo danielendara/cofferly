@@ -41,9 +41,9 @@ jobs:
           ./scripts/check-docs.sh
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Linux GUI deps
         if: runner.os == 'Linux'
@@ -75,9 +75,9 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
-          components: llvm-tools-preview
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Linux GUI deps
         run: |
@@ -129,7 +129,9 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
 
       # Advisory ignores: `.cargo/audit.toml` (keep `ignore:` below in sync if you use the action input).
       - name: cargo audit

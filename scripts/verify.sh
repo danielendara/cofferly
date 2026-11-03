@@ -10,6 +10,55 @@ cd "$(dirname "$0")/.."
 
 step() { printf '\n=== [%s] %s ===\n' "$1" "$2"; }
 
+headless_preflight() {
+  local missing=()
+  local found=0
+  if ldconfig -p 2>/dev/null | grep -qE 'libxkbcommon-x11\.so'; then
+    found=1
+  elif [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+    local d
+    local IFS=:
+    for d in $LD_LIBRARY_PATH; do
+      [[ -z "$d" ]] && continue
+      if compgen -G "$d/libxkbcommon-x11.so"* >/dev/null 2>&1; then
+        found=1
+        break
+      fi
+    done
+  fi
+  [[ "$found" -eq 1 ]] || missing+=("libxkbcommon-x11")
+
+  found=0
+  if [[ -n "${VK_ICD_FILENAMES:-}" ]]; then
+    local icd
+    local IFS=:
+    for icd in $VK_ICD_FILENAMES; do
+      [[ -z "$icd" ]] && continue
+      if [[ -f "$icd" ]]; then
+        found=1
+        break
+      fi
+    done
+  elif compgen -G "/usr/share/vulkan/icd.d/"*.json >/dev/null 2>&1; then
+    found=1
+  fi
+  [[ "$found" -eq 1 ]] || missing+=("Vulkan ICD (lavapipe / mesa-vulkan-drivers)")
+
+  if ((${#missing[@]})); then
+    local joined
+    joined=$(IFS=', '; echo "${missing[*]}")
+    printf 'verify preflight: missing %s for GUI smoke (step 9).\n' "$joined"
+    echo 'Install system packages or use the headless scratch-dir workaround in'
+    echo '`.cursor/skills/verify-cofferly/SKILL.md` → "Headless libs".'
+    exit 1
+  fi
+}
+
+if [[ "$(uname -s)" == Linux ]]; then
+  step preflight "headless libs (libxkbcommon-x11, Vulkan ICD)"
+  headless_preflight
+fi
+
 step 1/9 "vault guard"
 ./scripts/check-vault-paths.sh
 
