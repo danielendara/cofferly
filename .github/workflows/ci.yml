@@ -93,7 +93,7 @@ jobs:
       - name: Generate coverage
         run: |
           # Modest floor vs 2026-09-05 baseline of 76.11% line coverage
-          # (rustc 1.98.1) after excluding UI-only views.rs (~2% covered)
+          # after excluding UI-only views.rs (~2% covered)
           # and maintainer screenshot capture.rs (0%). Those files dominate
           # uncovered lines (~54% overall) and would hide a drop in money,
           # story unlock, or ledger tests.
@@ -133,7 +133,7 @@ jobs:
         with:
           components: rustfmt, clippy, llvm-tools-preview
 
-      # Advisory ignores: `.cargo/audit.toml` (keep `ignore:` below in sync if you use the action input).
+      # Advisory ignores: `.cargo/audit.toml` (single source for rustsec/audit-check).
       - name: cargo audit
         uses: rustsec/audit-check@v2.0.0
         with:
