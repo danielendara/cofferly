@@ -314,7 +314,7 @@ fn encrypted_unlock_accepts_the_right_pin_and_clears_pin_fields() {
     assert_eq!(app.status.severity, StatusSeverity::Success);
 }
 
-// --- #156: correcting a mistyped entry ---------------------------------
+// --- correcting a mistyped entry ---------------------------------
 
 /// Wallet with three dated entries, so corrections land in the middle of a
 /// ledger rather than only on the newest row.
@@ -601,7 +601,7 @@ fn encrypted_unlock_rejects_wrong_pin_without_exposing_data() {
     assert!(app.session.is_none());
     assert_ne!(app.selected_wallet().child_name, "Secret wallet");
     assert!(app.pin_digits.iter().all(String::is_empty));
-    // The first two wrong attempts are a free grace period (#80): no cooldown yet.
+    // The first two wrong attempts are a free grace period: no cooldown yet.
     assert_eq!(
         app.status.text,
         "Wrong credential or data has been tampered with."
@@ -1380,7 +1380,7 @@ fn restarting_with_more_than_two_wallets_keeps_the_previously_selected_wallet() 
     assert_eq!(app.selected_wallet().child_name, "Child 5");
 }
 
-/// Issue #135: persisted selection should follow the wallet's identity
+/// Persisted selection should follow the wallet's identity
 /// (`child_name`), not its position, so unlock restores the same child
 /// even though the placeholder position (index 0) differs from where
 /// the wallet actually landed.
@@ -1425,7 +1425,7 @@ fn unlock_restores_last_selected_wallet_by_name() {
     );
 }
 
-/// Issue #135: if the previously-selected wallet was deleted while
+/// If the previously-selected wallet was deleted while
 /// locked (or on another launch), unlock should fall back to the first
 /// wallet rather than silently landing on whatever wallet now occupies
 /// the old index.
@@ -1461,7 +1461,7 @@ fn unlock_falls_back_to_first_wallet_when_selected_wallet_was_deleted() {
     assert_eq!(app.selected_wallet().child_name, "Alice");
 }
 
-/// Issue #135: selecting a wallet, locking, and unlocking again within
+/// Selecting a wallet, locking, and unlocking again within
 /// the same run (no relaunch, so `raw_bytes`/`pending_wallet_selection_name`
 /// aren't repopulated from disk) must keep the selection the parent had
 /// -- `apply_unlock`'s no-persisted-name branch should defer to whatever
@@ -1501,7 +1501,7 @@ fn selection_persists_across_a_lock_and_unlock_cycle() {
     assert_eq!(app.selected_wallet().child_name, "Bob");
 }
 
-/// Issue #135 + #131: keyboard wallet switching (`apply_wallet_keyboard_delta`)
+/// Keyboard wallet switching (`apply_wallet_keyboard_delta`)
 /// goes through the same `select_wallet` as a sidebar click, so `save()`
 /// must persist the keyboard-selected wallet's name too -- persistence
 /// should not care which input method changed the selection.
@@ -3746,7 +3746,7 @@ fn refresh_draft_date_leaves_an_open_correction_alone() {
     assert_eq!(app.draft.date_input, loaded);
 }
 
-// --- #252: Settings removals must not retarget an open correction -------
+// --- Settings removals must not retarget an open correction -------------
 
 /// Newest-by-date entry sits at position 0, so removing it shifts the rest.
 fn app_with_newest_entry_first() -> (CofferlyApp, TempDir) {
@@ -3870,7 +3870,7 @@ fn stale_correction_writes_nothing() {
     assert_eq!(std::fs::read(&app.data_path).unwrap(), disk_before);
 }
 
-// --- #266: deleting a wallet ends an open correction --------------------
+// --- deleting a wallet ends an open correction --------------------------
 
 /// Ana/Ben/Cal, each with the same $5.00 weekly allowance, Ben mid-correction
 /// with a half-typed new entry stashed.

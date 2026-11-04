@@ -251,7 +251,7 @@ struct UiState {
     last_backup: Option<String>,
 }
 
-/// A backup chosen for restore (#177). Nothing on disk changes until its
+/// A backup chosen for restore. Nothing on disk changes until its
 /// Coffer Story decrypts it and the parent confirms the replace.
 pub(crate) struct PendingRestore {
     pub(crate) file_name: String,
@@ -305,9 +305,9 @@ pub(crate) struct CofferlyApp {
     pending_ledger_filter_focus: bool,
     draft: EntryDraft,
     starting_balance_input: String,
-    /// Settings field for the selected wallet's weekly allowance (#179); blank = off.
+    /// Settings field for the selected wallet's weekly allowance; blank = off.
     weekly_allowance_input: String,
-    /// Settings field for the selected wallet's savings goal (#181); blank = none.
+    /// Settings field for the selected wallet's savings goal; blank = none.
     savings_goal_input: String,
     child_name_input: String,
     new_child_name_input: String,
@@ -863,11 +863,11 @@ impl CofferlyApp {
                 .iter()
                 .position(|wallet| wallet.child_name == name)
                 // Named wallet no longer exists (deleted) -- fall back to
-                // the first wallet, per issue #135.
+                // the first wallet.
                 .unwrap_or(0),
-            // No name was ever persisted (state saved by a pre-#135 build,
+            // No name was ever persisted (state saved by an older build,
             // or this is a later unlock in the same run): keep the
-            // existing index-based clamp so upgrading doesn't regress #113.
+            // existing index-based clamp so upgrading doesn't regress.
             None if self.selected_wallet < data.wallets.len() => self.selected_wallet,
             None => 0,
         };
@@ -922,7 +922,7 @@ impl CofferlyApp {
         }
     }
 
-    /// Posts every wallet's due weekly allowance (#179) into a copy of the
+    /// Posts every wallet's due weekly allowance into a copy of the
     /// ledger and saves that copy; the in-memory ledger is replaced only after
     /// the encrypted save succeeds. Entries and each wallet's `last_posted`
     /// travel in the same vault write, so a failed save changes nothing (the
@@ -2057,7 +2057,7 @@ impl CofferlyApp {
         self.save_weekly_allowance_on(Local::now().date_naive());
     }
 
-    /// One amount field (#179): blank turns the allowance off; a new amount
+    /// One amount field: blank turns the allowance off; a new amount
     /// turns it on with today's weekday; changing the amount keeps the weekday
     /// and `last_posted` (only future weeks use the new amount).
     fn save_weekly_allowance_on(&mut self, today: NaiveDate) {
@@ -2132,7 +2132,7 @@ impl CofferlyApp {
         }
     }
 
-    /// One amount field (#181). Blank clears the goal. Zero, negative, and
+    /// One amount field. Blank clears the goal. Zero, negative, and
     /// amounts outside `MAX_ABSOLUTE_CENTS` are rejected, same as other money.
     fn save_savings_goal(&mut self) {
         if !self.can_change("Unlock parent mode before changing the savings goal.") {
