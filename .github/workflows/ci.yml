@@ -41,7 +41,7 @@ jobs:
           ./scripts/check-docs.sh
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy, llvm-tools-preview
 
@@ -75,7 +75,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy, llvm-tools-preview
 
@@ -129,7 +129,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy, llvm-tools-preview
 
