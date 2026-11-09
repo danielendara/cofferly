@@ -220,6 +220,7 @@ struct LedgerRow<'a> {
 pub struct OwnedLedgerRow {
     pub date: LedgerRowDate,
     pub description: String,
+    description_lowercase: String,
     pub amount_cents: i64,
     pub balance_cents: i64,
     /// See `LedgerRow::entry_index`.
@@ -231,6 +232,7 @@ impl OwnedLedgerRow {
         Self {
             date: row.date,
             description: row.description.to_owned(),
+            description_lowercase: row.description.to_lowercase(),
             amount_cents: row.amount_cents,
             balance_cents: row.balance_cents,
             entry_index: row.entry_index,
@@ -501,15 +503,15 @@ pub fn ledger_filter_summary<'a>(
     let keep_all = query.is_empty();
     let mut filtered = Vec::new();
     let mut matching_entry_count = 0;
-    let mut matching_net_cents = 0;
+    let mut matching_net_cents: i64 = 0;
 
     for row in rows {
         let is_start = matches!(row.date, LedgerRowDate::Start);
-        if keep_all || is_start || row.description.to_lowercase().contains(&query) {
+        if keep_all || is_start || row.description_lowercase.contains(&query) {
             filtered.push(row);
             if !is_start {
                 matching_entry_count += 1;
-                matching_net_cents += row.amount_cents;
+                matching_net_cents = matching_net_cents.saturating_add(row.amount_cents);
             }
         }
     }
@@ -1033,6 +1035,25 @@ mod tests {
                 case.query
             );
         }
+    }
+
+    #[test]
+    fn ledger_filter_summary_saturates_net_and_uses_cached_unicode_description() {
+        let wallet = snack_allowance_bus_fare_test_wallets()[0].clone();
+        let mut rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        rows[1].description = "ÉCLAIR".to_owned();
+        rows[1].description_lowercase = rows[1].description.to_lowercase();
+        rows[1].amount_cents = i64::MAX;
+        rows[2].amount_cents = 1;
+
+        assert_eq!(
+            ledger_filter_summary(&rows, " éclair ").matching_entry_count,
+            1
+        );
+        assert_eq!(
+            ledger_filter_summary(&rows[..3], "").matching_net_cents,
+            i64::MAX
+        );
     }
 
     #[test]
