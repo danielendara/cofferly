@@ -28,3 +28,9 @@ updates:
       - github_actions
     commit-message:
       prefix: "ci"
+    ignore:
+      # This action's tags are Rust versions, not action releases: `@1.99.1` installs Rust
+      # 1.99.1. Dependabot reads the highest tag as "newer", so it proposed a non-existent
+      # toolchain (1.120.0, PR #277) that fails every job at "Install Rust". Bump Rust by hand:
+      # rust-toolchain.toml and every `dtolnay/rust-toolchain@` pin in .github/workflows together.
+      - dependency-name: "dtolnay/rust-toolchain"
