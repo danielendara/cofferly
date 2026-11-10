@@ -219,32 +219,20 @@ impl Status {
     }
 }
 
-/// Non-sensitive UI prefs restored via eframe storage (never unlock state or PINs).
+/// Non-sensitive UI prefs restored via eframe storage (never unlock state, PINs,
+/// child names, or ledger search text -- those stay inside the encrypted vault
+/// or in memory only). Older persisted copies that carried such fields are
+/// ignored on read and dropped on the next save.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct UiState {
     selected_wallet: usize,
     ledger_sort_newest_first: bool,
-    /// The selected wallet's `child_name` at last save, used to restore the
-    /// same wallet by identity (not position) after unlock -- an index alone
-    /// would point at the wrong wallet if one was deleted, or a wrong-but-
-    /// in-bounds one if the roster reordered. `#[serde(default)]` so state
-    /// persisted by older builds (no such field) still deserializes; those
-    /// fall back to the plain index-based restore they always had.
-    #[serde(default)]
-    selected_wallet_name: Option<String>,
     /// Last-selected Money in/out kind, restored into a fresh `EntryDraft` on
     /// unlock/relaunch. `#[serde(default)]` so state persisted by older
     /// builds (no such field) still deserializes -- `EntryKind::default()`
     /// is `Deduction`, matching today's hardcoded `EntryDraft::new()` value.
     #[serde(default)]
     last_entry_kind: EntryKind,
-    /// Selected child's ledger filter; per-child map in `ledger_filters`. See
-    /// `CofferlyApp::ledger_filter` / `ledger_filters`. `#[serde(default)]`.
-    #[serde(default)]
-    ledger_filter: String,
-    /// Per-child ledger filters keyed by `child_name`. `#[serde(default)]`.
-    #[serde(default)]
-    ledger_filters: HashMap<String, String>,
     /// Date (YYYY-MM-DD) of the last verified vault backup, shown in Settings.
     /// `#[serde(default)]` so older state without it reads as "Never backed up".
     #[serde(default)]
@@ -2716,14 +2704,7 @@ impl eframe::App for CofferlyApp {
         let state = UiState {
             selected_wallet: self.selected_wallet,
             ledger_sort_newest_first: matches!(self.ledger_sort, LedgerSort::NewestFirst),
-            selected_wallet_name: self
-                .data
-                .wallets
-                .get(self.selected_wallet)
-                .map(|wallet| wallet.child_name.clone()),
             last_entry_kind: self.draft.kind,
-            ledger_filter: self.ledger_filter.clone(),
-            ledger_filters: self.ledger_filters.clone(),
             last_backup: self.last_backup.clone(),
         };
         eframe::set_value(storage, UI_STATE_KEY, &state);
@@ -3135,32 +3116,12 @@ fn restore_ui_state(storage: Option<&dyn eframe::Storage>, wallet_count: usize) 
     RestoredUiState {
         wallet_index,
         ledger_sort,
-        wallet_name: state.selected_wallet_name,
+        wallet_name: None,
         entry_kind: state.last_entry_kind,
-        ledger_filter: restore_ledger_filter(state.ledger_filter),
-        ledger_filters: restore_ledger_filters(state.ledger_filters),
+        ledger_filter: String::new(),
+        ledger_filters: HashMap::new(),
         last_backup_date: state.last_backup,
     }
-}
-
-const LEDGER_FILTER_RESTORE_MAX_CHARS: usize = 80;
-
-fn restore_ledger_filter(saved: String) -> String {
-    if saved.chars().count() <= LEDGER_FILTER_RESTORE_MAX_CHARS {
-        saved
-    } else {
-        saved
-            .chars()
-            .take(LEDGER_FILTER_RESTORE_MAX_CHARS)
-            .collect()
-    }
-}
-
-fn restore_ledger_filters(saved: HashMap<String, String>) -> HashMap<String, String> {
-    saved
-        .into_iter()
-        .map(|(name, query)| (name, restore_ledger_filter(query)))
-        .collect()
 }
 
 pub(crate) fn pin_digit_id(index: usize) -> egui::Id {
