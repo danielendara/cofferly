@@ -1355,10 +1355,7 @@ fn restarting_with_more_than_two_wallets_keeps_the_previously_selected_wallet() 
         &UiState {
             selected_wallet: 4,
             ledger_sort_newest_first: true,
-            selected_wallet_name: None,
             last_entry_kind: EntryKind::default(),
-            ledger_filter: String::new(),
-            ledger_filters: HashMap::new(),
             last_backup: None,
         },
     );
@@ -1503,7 +1500,7 @@ fn selection_persists_across_a_lock_and_unlock_cycle() {
 
 /// Keyboard wallet switching (`apply_wallet_keyboard_delta`)
 /// goes through the same `select_wallet` as a sidebar click, so `save()`
-/// must persist the keyboard-selected wallet's name too -- persistence
+/// must persist the keyboard-selected wallet's index -- persistence
 /// should not care which input method changed the selection.
 #[test]
 fn keyboard_wallet_switch_persists_through_save_like_a_sidebar_click() {
@@ -1533,7 +1530,6 @@ fn keyboard_wallet_switch_persists_through_save_like_a_sidebar_click() {
 
     let saved = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
     assert_eq!(saved.selected_wallet, 1);
-    assert_eq!(saved.selected_wallet_name.as_deref(), Some("Bob"));
 }
 
 #[test]
@@ -1563,10 +1559,7 @@ fn last_entry_kind_restores_into_a_fresh_draft_on_construction() {
         &UiState {
             selected_wallet: 0,
             ledger_sort_newest_first: true,
-            selected_wallet_name: None,
             last_entry_kind: EntryKind::Deposit,
-            ledger_filter: String::new(),
-            ledger_filters: HashMap::new(),
             last_backup: None,
         },
     );
@@ -1576,88 +1569,6 @@ fn last_entry_kind_restores_into_a_fresh_draft_on_construction() {
     let app = CofferlyApp::new(&cc);
 
     assert_eq!(app.draft.kind, EntryKind::Deposit);
-}
-
-#[test]
-fn ledger_filter_persists_through_save() {
-    let (mut app, _dir) = test_app();
-    app.ledger_filter = "allowance".to_owned();
-
-    let mut storage = FakeStorage::default();
-    eframe::App::save(&mut app, &mut storage);
-
-    let saved = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
-    assert_eq!(saved.ledger_filter, "allowance");
-    assert_eq!(
-        saved.ledger_filters.get("Child 1").map(String::as_str),
-        Some("allowance")
-    );
-}
-
-#[test]
-fn ledger_filter_restores_on_construction_and_caps_length() {
-    let dir = tempdir().unwrap();
-    let _data_dir = ScopedDataDir::set(dir.path());
-
-    let long_filter = "x".repeat(100);
-    let mut storage = FakeStorage::default();
-    eframe::set_value(
-        &mut storage,
-        UI_STATE_KEY,
-        &UiState {
-            selected_wallet: 0,
-            ledger_sort_newest_first: true,
-            selected_wallet_name: None,
-            last_entry_kind: EntryKind::default(),
-            ledger_filter: long_filter,
-            ledger_filters: HashMap::new(),
-            last_backup: None,
-        },
-    );
-    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
-    cc.storage = Some(&storage);
-
-    let app = CofferlyApp::new(&cc);
-
-    assert_eq!(app.ledger_filter, "x".repeat(80));
-}
-
-#[test]
-fn ui_state_without_ledger_filter_field_still_loads_and_defaults_to_empty() {
-    let mut storage = FakeStorage::default();
-    eframe::set_value(
-        &mut storage,
-        UI_STATE_KEY,
-        &UiState {
-            selected_wallet: 2,
-            ledger_sort_newest_first: false,
-            selected_wallet_name: Some("Alice".to_owned()),
-            last_entry_kind: EntryKind::Deposit,
-            ledger_filter: "snack".to_owned(),
-            ledger_filters: HashMap::new(),
-            last_backup: None,
-        },
-    );
-
-    let raw = storage.get_string(UI_STATE_KEY).unwrap();
-    let without_field = raw.replacen(",ledger_filter:\"snack\"", "", 1);
-    assert_ne!(
-        raw, without_field,
-        "expected to find and strip ledger_filter from the RON record"
-    );
-    storage.set_string(UI_STATE_KEY, without_field);
-
-    let restored = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
-    assert_eq!(restored.ledger_filter, "");
-
-    let dir = tempdir().unwrap();
-    let _data_dir = ScopedDataDir::set(dir.path());
-    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
-    cc.storage = Some(&storage);
-
-    let app = CofferlyApp::new(&cc);
-    assert_eq!(app.ledger_filter, "");
-    assert!(app.ledger_filters.is_empty());
 }
 
 #[test]
@@ -1682,87 +1593,6 @@ fn ledger_filter_is_per_child_when_switching_wallets() {
     assert_eq!(app.selected_wallet().child_name, "Child 2");
     assert_eq!(app.ledger_filter, "");
     app.apply_wallet_keyboard_delta(-1);
-    assert_eq!(app.ledger_filter, "snack");
-}
-
-#[test]
-fn lock_relaunch_restores_per_child_ledger_filters_not_a_global_string() {
-    let (mut app, _dir) = test_app();
-    app.ledger_filter = "snack".to_owned();
-    app.select_wallet(1);
-    assert_eq!(app.ledger_filter, "");
-    app.ledger_filter = "chores".to_owned();
-
-    let mut storage = FakeStorage::default();
-    eframe::App::save(&mut app, &mut storage);
-
-    let saved = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
-    assert_eq!(saved.ledger_filter, "chores");
-    assert_eq!(
-        saved.ledger_filters.get("Child 1").map(String::as_str),
-        Some("snack")
-    );
-    assert_eq!(
-        saved.ledger_filters.get("Child 2").map(String::as_str),
-        Some("chores")
-    );
-
-    let dir = tempdir().unwrap();
-    let _data_dir = ScopedDataDir::set(dir.path());
-    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
-    cc.storage = Some(&storage);
-    let mut restored = CofferlyApp::new(&cc);
-
-    assert_eq!(restored.selected_wallet, 1);
-    assert_eq!(restored.ledger_filter, "chores");
-    restored.select_wallet(0);
-    assert_eq!(restored.ledger_filter, "snack");
-    restored.select_wallet(1);
-    assert_eq!(restored.ledger_filter, "chores");
-}
-
-#[test]
-fn per_child_ledger_filters_restore_on_construction_not_as_a_global_string() {
-    let dir = tempdir().unwrap();
-    let _data_dir = ScopedDataDir::set(dir.path());
-
-    let mut filters = HashMap::new();
-    filters.insert("Child 1".to_owned(), "snack".to_owned());
-    filters.insert("Child 2".to_owned(), "x".repeat(100));
-
-    let mut storage = FakeStorage::default();
-    eframe::set_value(
-        &mut storage,
-        UI_STATE_KEY,
-        &UiState {
-            selected_wallet: 0,
-            ledger_sort_newest_first: true,
-            selected_wallet_name: Some("Child 1".to_owned()),
-            last_entry_kind: EntryKind::default(),
-            ledger_filter: "snack".to_owned(),
-            ledger_filters: filters,
-            last_backup: None,
-        },
-    );
-    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
-    cc.storage = Some(&storage);
-
-    let mut app = CofferlyApp::new(&cc);
-
-    assert_eq!(app.ledger_filter, "snack");
-    assert_eq!(
-        app.ledger_filters.get("Child 1").map(String::as_str),
-        Some("snack")
-    );
-    assert_eq!(
-        app.ledger_filters.get("Child 2").map(String::as_str),
-        Some(&*"x".repeat(80)),
-        "restored per-child text is capped at 80 chars"
-    );
-
-    app.select_wallet(1);
-    assert_eq!(app.ledger_filter, "x".repeat(80));
-    app.select_wallet(0);
     assert_eq!(app.ledger_filter, "snack");
 }
 
@@ -1848,49 +1678,6 @@ fn rename_moves_ledger_filter_map_key_and_delete_drops_it() {
 }
 
 #[test]
-fn ui_state_without_ledger_filters_field_still_loads() {
-    let mut storage = FakeStorage::default();
-    eframe::set_value(
-        &mut storage,
-        UI_STATE_KEY,
-        &UiState {
-            selected_wallet: 2,
-            ledger_sort_newest_first: false,
-            selected_wallet_name: Some("Alice".to_owned()),
-            last_entry_kind: EntryKind::Deposit,
-            ledger_filter: "snack".to_owned(),
-            ledger_filters: {
-                let mut filters = HashMap::new();
-                filters.insert("Alice".to_owned(), "snack".to_owned());
-                filters
-            },
-            last_backup: None,
-        },
-    );
-
-    let raw = storage.get_string(UI_STATE_KEY).unwrap();
-    let without_field = raw.replacen(",ledger_filters:{\"Alice\":\"snack\"}", "", 1);
-    assert_ne!(
-        raw, without_field,
-        "expected to find and strip ledger_filters from the RON record; got {raw}"
-    );
-    storage.set_string(UI_STATE_KEY, without_field);
-
-    let restored = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
-    assert_eq!(restored.ledger_filter, "snack");
-    assert!(restored.ledger_filters.is_empty());
-
-    let dir = tempdir().unwrap();
-    let _data_dir = ScopedDataDir::set(dir.path());
-    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
-    cc.storage = Some(&storage);
-
-    let app = CofferlyApp::new(&cc);
-    assert_eq!(app.ledger_filter, "snack");
-    assert!(app.ledger_filters.is_empty());
-}
-
-#[test]
 fn ui_state_without_last_entry_kind_field_still_loads_and_defaults_to_deduction() {
     let mut storage = FakeStorage::default();
     eframe::set_value(
@@ -1899,10 +1686,7 @@ fn ui_state_without_last_entry_kind_field_still_loads_and_defaults_to_deduction(
         &UiState {
             selected_wallet: 2,
             ledger_sort_newest_first: false,
-            selected_wallet_name: Some("Alice".to_owned()),
             last_entry_kind: EntryKind::Deposit,
-            ledger_filter: String::new(),
-            ledger_filters: HashMap::new(),
             last_backup: None,
         },
     );
@@ -1920,7 +1704,6 @@ fn ui_state_without_last_entry_kind_field_still_loads_and_defaults_to_deduction(
 
     let restored = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
     assert_eq!(restored.selected_wallet, 2);
-    assert_eq!(restored.selected_wallet_name.as_deref(), Some("Alice"));
     assert_eq!(restored.last_entry_kind, EntryKind::Deduction);
 }
 
@@ -3683,10 +3466,7 @@ fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
         &UiState {
             selected_wallet: 7,
             ledger_sort_newest_first: false,
-            selected_wallet_name: Some("Child B".to_owned()),
             last_entry_kind: EntryKind::Deposit,
-            ledger_filter: "Snack".to_owned(),
-            ledger_filters: HashMap::from([("Child B".to_owned(), "Snack".to_owned())]),
             last_backup: Some("2026-01-02".to_owned()),
         },
     );
@@ -3695,13 +3475,10 @@ fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
 
     assert_eq!(restored.wallet_index, 2, "clamped to wallet_count - 1");
     assert_eq!(restored.ledger_sort, LedgerSort::OldestFirst);
-    assert_eq!(restored.wallet_name.as_deref(), Some("Child B"));
+    assert_eq!(restored.wallet_name, None);
     assert_eq!(restored.entry_kind, EntryKind::Deposit);
-    assert_eq!(restored.ledger_filter, "Snack");
-    assert_eq!(
-        restored.ledger_filters,
-        HashMap::from([("Child B".to_owned(), "Snack".to_owned())])
-    );
+    assert!(restored.ledger_filter.is_empty());
+    assert!(restored.ledger_filters.is_empty());
     assert_eq!(restored.last_backup_date.as_deref(), Some("2026-01-02"));
 
     // An index within range is kept, and a zero wallet count still yields 0.
@@ -3937,4 +3714,33 @@ fn deleting_a_wallet_write_failure_keeps_the_open_correction() {
     assert_eq!((session.wallet_index, session.entry_index), (1, 0));
     assert_eq!(app.draft.amount, "7.00");
     assert_eq!(session.stashed_draft.description, "half typed");
+}
+
+/// Child names and ledger search text must stay inside the encrypted vault (or
+/// in memory); the plain UI-state record may only hold non-sensitive prefs.
+#[test]
+fn ui_state_save_keeps_names_and_filter_text_out_of_plain_storage() {
+    let (mut app, _dir) = test_app();
+    app.data.wallets[0].child_name = "Synthetic Kid Alpha".to_owned();
+    app.ledger_filter = "synthetic-filter-text".to_owned();
+
+    let mut storage = FakeStorage::default();
+    // A record written by an older build that carried the sensitive fields.
+    storage.set_string(
+        UI_STATE_KEY,
+        r#"(selected_wallet:0,ledger_sort_newest_first:true,selected_wallet_name:Some("Synthetic Kid Alpha"),last_entry_kind:Deduction,ledger_filter:"synthetic-filter-text",ledger_filters:{"Synthetic Kid Alpha":"synthetic-filter-text"},last_backup:None)"#
+            .to_owned(),
+    );
+    // Old records still load, but the sensitive fields are not restored.
+    let restored = restore_ui_state(Some(&storage), 2);
+    assert_eq!(restored.wallet_name, None);
+    assert!(restored.ledger_filter.is_empty());
+    assert!(restored.ledger_filters.is_empty());
+
+    // Saving replaces the old record without any of those strings.
+    eframe::App::save(&mut app, &mut storage);
+    let raw = storage.get_string(UI_STATE_KEY).unwrap();
+    assert!(!raw.contains("Synthetic Kid Alpha"), "{raw}");
+    assert!(!raw.contains("synthetic-filter-text"), "{raw}");
+    assert!(eframe::get_value::<UiState>(&storage, UI_STATE_KEY).is_some());
 }
