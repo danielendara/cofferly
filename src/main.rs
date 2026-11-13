@@ -284,9 +284,8 @@ pub(crate) struct CofferlyApp {
     ledger_cache: Option<(usize, LedgerSort, Arc<[OwnedLedgerRow]>)>,
     /// Local ledger description filter (display-only): narrows `ledger_table`
     /// rows without mutating `Wallet::entries`, sort order, or `ledger_cache`.
-    /// Persisted via `UiState`; selected child's string, others in `ledger_filters`.
     ledger_filter: String,
-    /// Per-child ledger filters keyed by `child_name` (same display-only rules).
+    /// Per-child ledger filters keyed by `child_name` (in-memory only).
     ledger_filters: HashMap<String, String>,
     /// Set by the `/` shortcut, consumed (and cleared) the next time
     /// `ledger_table` renders the filter field.
@@ -336,11 +335,6 @@ pub(crate) struct CofferlyApp {
     /// Paths of temp exports/recovery cards written this session, so they can
     /// be deleted on lock/exit instead of lingering until the next launch.
     temp_artifact_paths: Vec<PathBuf>,
-    /// The wallet name persisted from a previous run, awaiting resolution
-    /// against the real wallet list once a vault unlock succeeds (the vault
-    /// is still encrypted at construction time, so it can't be resolved to
-    /// an index yet). Consumed (set to `None`) by the first `apply_unlock`.
-    pending_wallet_selection_name: Option<String>,
     /// Date of the last verified backup, persisted via `UiState`.
     last_backup: Option<String>,
     /// Restore in progress; drives the lock screen while `Some`.
@@ -534,8 +528,8 @@ impl CofferlyApp {
             selected_wallet: restored.wallet_index,
             ledger_sort: restored.ledger_sort,
             ledger_cache: None,
-            ledger_filter: restored.ledger_filter,
-            ledger_filters: restored.ledger_filters,
+            ledger_filter: String::new(),
+            ledger_filters: HashMap::new(),
             pending_ledger_filter_focus: false,
             draft,
             starting_balance_input: String::new(),
@@ -572,7 +566,6 @@ impl CofferlyApp {
             capture: capture::CaptureSession::from_env(),
             capturing: std::env::var_os("COFFERLY_CAPTURE").is_some(),
             temp_artifact_paths: Vec::new(),
-            pending_wallet_selection_name: restored.wallet_name,
             last_backup: restored.last_backup_date,
             restore: None,
         }
@@ -635,8 +628,7 @@ impl CofferlyApp {
         self.invalidate_ledger_cache();
     }
 
-    /// Stash the live query under the selected child's name. In-memory only —
-    /// eframe writeback happens in `App::save`.
+    /// Stash the live query under the selected child's name (in-memory only).
     fn remember_selected_ledger_filter(&mut self) {
         if let Some(name) = self
             .data
@@ -837,43 +829,10 @@ impl CofferlyApp {
         session: SessionCrypto,
         today: NaiveDate,
     ) -> Option<Status> {
-        // Restore the wallet the parent had open last, by identity rather
-        // than position -- an index alone can't tell a deleted wallet from
-        // a merely-reordered one. `pending_wallet_selection_name` is only
-        // populated once (from the last run's persisted state), so a
-        // second unlock later in the same run (e.g. after an in-process
-        // lock) falls through to the index branch, which by then already
-        // holds whatever the parent had selected before locking.
-        let requested_wallet_name = self.pending_wallet_selection_name.take();
-        self.selected_wallet = match requested_wallet_name.as_deref() {
-            Some(name) => data
-                .wallets
-                .iter()
-                .position(|wallet| wallet.child_name == name)
-                // Named wallet no longer exists (deleted) -- fall back to
-                // the first wallet.
-                .unwrap_or(0),
-            // No name was ever persisted (state saved by an older build,
-            // or this is a later unlock in the same run): keep the
-            // existing index-based clamp so upgrading doesn't regress.
-            None if self.selected_wallet < data.wallets.len() => self.selected_wallet,
-            None => 0,
-        };
-        self.data = data;
-        // Relaunch restores `ledger_filter` as the last selected kid's query.
-        // If that child is gone, swap to the fallback kid's saved string
-        // (missing → empty) so we don't carry a deleted child's search.
-        // Same-run lock/unlock has no pending name — leave the live query.
-        if let Some(requested) = requested_wallet_name {
-            let resolved = self
-                .data
-                .wallets
-                .get(self.selected_wallet)
-                .map(|wallet| wallet.child_name.as_str());
-            if resolved != Some(requested.as_str()) {
-                self.ledger_filter = self.ledger_filter_for_selected();
-            }
+        if self.selected_wallet >= data.wallets.len() {
+            self.selected_wallet = 0;
         }
+        self.data = data;
         let legacy = session.version() == crypto::LEGACY_PIN_VERSION;
         self.session = Some(session);
         self.parent_unlocked = !legacy;
@@ -3072,16 +3031,7 @@ struct RestoredUiState {
     /// pre-unlock/fresh-install path -- see the call site in `CofferlyApp::new`).
     wallet_index: usize,
     ledger_sort: LedgerSort,
-    /// The persisted wallet name (if any), which `apply_unlock` resolves
-    /// against the real wallet list once it's known.
-    wallet_name: Option<String>,
-    /// The last-selected Money in/out kind.
     entry_kind: EntryKind,
-    /// The selected kid's ledger description filter.
-    ledger_filter: String,
-    /// The per-child filter map (applied directly -- unlike the wallet name,
-    /// the filters need no real data to resolve against).
-    ledger_filters: HashMap<String, String>,
     last_backup_date: Option<String>,
 }
 
@@ -3090,10 +3040,7 @@ impl Default for RestoredUiState {
         Self {
             wallet_index: 0,
             ledger_sort: LedgerSort::NewestFirst,
-            wallet_name: None,
             entry_kind: EntryKind::default(),
-            ledger_filter: String::new(),
-            ledger_filters: HashMap::new(),
             last_backup_date: None,
         }
     }
@@ -3116,10 +3063,7 @@ fn restore_ui_state(storage: Option<&dyn eframe::Storage>, wallet_count: usize) 
     RestoredUiState {
         wallet_index,
         ledger_sort,
-        wallet_name: None,
         entry_kind: state.last_entry_kind,
-        ledger_filter: String::new(),
-        ledger_filters: HashMap::new(),
         last_backup_date: state.last_backup,
     }
 }

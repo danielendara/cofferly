@@ -56,7 +56,6 @@ fn test_app() -> (CofferlyApp, TempDir) {
         capture: None,
         capturing: false,
         temp_artifact_paths: Vec::new(),
-        pending_wallet_selection_name: None,
         last_backup: None,
         restore: None,
     };
@@ -1377,92 +1376,21 @@ fn restarting_with_more_than_two_wallets_keeps_the_previously_selected_wallet() 
     assert_eq!(app.selected_wallet().child_name, "Child 5");
 }
 
-/// Persisted selection should follow the wallet's identity
-/// (`child_name`), not its position, so unlock restores the same child
-/// even though the placeholder position (index 0) differs from where
-/// the wallet actually landed.
+/// Selecting a wallet, locking, and unlocking again within the same run must
+/// keep the selection the parent had — `apply_unlock` keeps the in-memory
+/// index when it still fits the decrypted wallet list.
 #[test]
-fn unlock_restores_last_selected_wallet_by_name() {
+fn unlock_clamps_selected_wallet_when_index_is_out_of_range() {
     let (mut app, _dir) = test_app();
-    app.pending_wallet_selection_name = Some("Charlie".to_owned());
+    app.selected_wallet = 5;
 
-    let mut data = default_app_data();
-    data.wallets = vec![
-        Wallet {
-            child_name: "Alice".to_owned(),
-            starting_balance_cents: 0,
-            entries: Vec::new(),
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        },
-        Wallet {
-            child_name: "Bob".to_owned(),
-            starting_balance_cents: 0,
-            entries: Vec::new(),
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        },
-        Wallet {
-            child_name: "Charlie".to_owned(),
-            starting_balance_cents: 0,
-            entries: Vec::new(),
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        },
-    ];
+    let data = default_app_data();
     let session = SessionCrypto::establish("test-secret").unwrap();
-
-    app.apply_unlock(data, session);
-
-    assert_eq!(app.selected_wallet, 2);
-    assert_eq!(app.selected_wallet().child_name, "Charlie");
-    assert!(
-        app.pending_wallet_selection_name.is_none(),
-        "the persisted name should be consumed once resolved"
-    );
-}
-
-/// If the previously-selected wallet was deleted while
-/// locked (or on another launch), unlock should fall back to the first
-/// wallet rather than silently landing on whatever wallet now occupies
-/// the old index.
-#[test]
-fn unlock_falls_back_to_first_wallet_when_selected_wallet_was_deleted() {
-    let (mut app, _dir) = test_app();
-    app.selected_wallet = 1;
-    app.pending_wallet_selection_name = Some("Charlie".to_owned());
-
-    // "Charlie" is gone; "Alice" now sits at index 0.
-    let mut data = default_app_data();
-    data.wallets = vec![
-        Wallet {
-            child_name: "Alice".to_owned(),
-            starting_balance_cents: 0,
-            entries: Vec::new(),
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        },
-        Wallet {
-            child_name: "Bob".to_owned(),
-            starting_balance_cents: 0,
-            entries: Vec::new(),
-            weekly_allowance: None,
-            savings_goal_cents: None,
-        },
-    ];
-    let session = SessionCrypto::establish("test-secret").unwrap();
-
     app.apply_unlock(data, session);
 
     assert_eq!(app.selected_wallet, 0);
-    assert_eq!(app.selected_wallet().child_name, "Alice");
 }
 
-/// Selecting a wallet, locking, and unlocking again within
-/// the same run (no relaunch, so `raw_bytes`/`pending_wallet_selection_name`
-/// aren't repopulated from disk) must keep the selection the parent had
-/// -- `apply_unlock`'s no-persisted-name branch should defer to whatever
-/// index is already in memory instead of resetting to 0.
 #[test]
 fn selection_persists_across_a_lock_and_unlock_cycle() {
     let (mut app, _dir) = test_app();
@@ -3450,11 +3378,40 @@ fn restore_ui_state_without_storage_or_saved_state_uses_defaults() {
     let defaults = RestoredUiState::default();
     assert_eq!(defaults.wallet_index, 0);
     assert_eq!(defaults.ledger_sort, LedgerSort::NewestFirst);
-    assert_eq!(defaults.wallet_name, None);
     assert_eq!(defaults.entry_kind, EntryKind::Deduction);
-    assert!(defaults.ledger_filter.is_empty());
-    assert!(defaults.ledger_filters.is_empty());
     assert_eq!(defaults.last_backup_date, None);
+}
+
+#[test]
+fn relaunch_restores_wallet_by_index_and_starts_ledger_filters_empty() {
+    let dir = tempdir().unwrap();
+    let _data_dir = ScopedDataDir::set(dir.path());
+
+    let mut storage = FakeStorage::default();
+    eframe::set_value(
+        &mut storage,
+        UI_STATE_KEY,
+        &UiState {
+            selected_wallet: 1,
+            ledger_sort_newest_first: true,
+            last_entry_kind: EntryKind::default(),
+            last_backup: None,
+        },
+    );
+    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+    cc.storage = Some(&storage);
+
+    let app = CofferlyApp::new(&cc);
+
+    assert_eq!(app.selected_wallet, 1);
+    assert!(
+        app.ledger_filter.is_empty(),
+        "ledger search text is not restored across relaunch"
+    );
+    assert!(
+        app.ledger_filters.is_empty(),
+        "per-child filter map is not restored across relaunch"
+    );
 }
 
 #[test]
@@ -3475,10 +3432,7 @@ fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
 
     assert_eq!(restored.wallet_index, 2, "clamped to wallet_count - 1");
     assert_eq!(restored.ledger_sort, LedgerSort::OldestFirst);
-    assert_eq!(restored.wallet_name, None);
     assert_eq!(restored.entry_kind, EntryKind::Deposit);
-    assert!(restored.ledger_filter.is_empty());
-    assert!(restored.ledger_filters.is_empty());
     assert_eq!(restored.last_backup_date.as_deref(), Some("2026-01-02"));
 
     // An index within range is kept, and a zero wallet count still yields 0.
@@ -3731,11 +3685,9 @@ fn ui_state_save_keeps_names_and_filter_text_out_of_plain_storage() {
         r#"(selected_wallet:0,ledger_sort_newest_first:true,selected_wallet_name:Some("Synthetic Kid Alpha"),last_entry_kind:Deduction,ledger_filter:"synthetic-filter-text",ledger_filters:{"Synthetic Kid Alpha":"synthetic-filter-text"},last_backup:None)"#
             .to_owned(),
     );
-    // Old records still load, but the sensitive fields are not restored.
+    // Old records still load; only non-sensitive prefs are restored.
     let restored = restore_ui_state(Some(&storage), 2);
-    assert_eq!(restored.wallet_name, None);
-    assert!(restored.ledger_filter.is_empty());
-    assert!(restored.ledger_filters.is_empty());
+    assert_eq!(restored.wallet_index, 0);
 
     // Saving replaces the old record without any of those strings.
     eframe::App::save(&mut app, &mut storage);
