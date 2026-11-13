@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
@@ -41,8 +41,9 @@ jobs:
           ./scripts/check-docs.sh
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Linux GUI deps
@@ -52,7 +53,7 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Format
         if: runner.os == 'Linux'
@@ -70,13 +71,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Linux GUI deps
@@ -85,10 +87,10 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@3f7c3597aa4e6da3f315e128de702ce61e7b2877 # cargo-llvm-cov
 
       - name: Generate coverage
         run: |
@@ -107,7 +109,7 @@ jobs:
 
       - name: Upload coverage report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-report
           path: |
@@ -124,17 +126,18 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy, llvm-tools-preview
 
       # Advisory ignores: `.cargo/audit.toml` (single source for rustsec/audit-check).
       - name: cargo audit
-        uses: rustsec/audit-check@v2.0.0
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
