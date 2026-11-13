@@ -32,7 +32,7 @@ const OPEN_COFFER_IMAGE_BYTES: &[u8] = include_bytes!("../assets/cofferly-open.p
 const AUTO_LOCK_AFTER: Duration = Duration::from_secs(10 * 60);
 /// Show a quiet countdown for the last two minutes before auto-lock.
 const AUTO_LOCK_WARN: Duration = Duration::from_secs(2 * 60);
-/// Escalating delays after consecutive wrong PINs. This slows automated UI
+/// Escalating delays after consecutive failed unlock attempts. This slows automated UI
 /// guessing without creating a permanent lockout for a parent.
 const UNLOCK_COOLDOWN_MINUTES: [u64; 6] = [1, 2, 5, 15, 30, 60];
 const UI_STATE_KEY: &str = "cofferly/ui_state";
@@ -174,7 +174,7 @@ struct MutationSnapshot {
 }
 
 /// The secret a vault write encrypts with: an established session already holds
-/// the data key, so only a fresh vault needs the parent PIN.
+/// the data key, so only a fresh vault needs the unlock secret (Coffer Story or legacy PIN).
 fn save_secret_for(session: &Option<SessionCrypto>, data: &AppData) -> String {
     if session.is_some() {
         String::new()

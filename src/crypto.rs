@@ -193,7 +193,7 @@ pub fn is_current_format(data: &[u8]) -> bool {
 }
 
 /// Decrypts a current-format blob and returns the plaintext plus a session ready
-/// for subsequent saves without re-running Argon2id (except on PIN change).
+/// for subsequent saves without re-running Argon2id (except when the credential is rewrapped).
 pub fn decrypt(encrypted: &[u8], pin: &str) -> Result<(Zeroizing<Vec<u8>>, SessionCrypto), String> {
     if !is_current_format(encrypted) {
         return Err("unsupported or corrupted data format".to_string());

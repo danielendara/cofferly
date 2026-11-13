@@ -60,7 +60,7 @@ Output is written to `dist/` (`Cofferly-{version}-Setup.exe`).
 3. Commit the release and merge to `main`.
 4. Tag it, for example `v0.4.0`, and push the tag.
 5. Confirm the Release workflow attached `Cofferly-*-windows-x64.zip` and `Cofferly-*-Setup.exe`.
-6. After tagging, refresh the current-state paragraph in `docs/RECOVERY.md`.
+6. After tagging, confirm GitHub Releases show the new tag and assets (`gh release view`).
 
 ## Repository Controls
 
