@@ -357,7 +357,7 @@ impl Wallet {
             // out-of-range goal instead of storing a wrapped value.
             Some(cents) => cents > 0 && valid_cents(cents),
         };
-        goal_ok && self.checked_running_balances().is_some()
+        goal_ok && self.running_balances_in_range()
     }
 
     /// Progress toward [`Self::savings_goal_cents`]. `None` when no positive
@@ -373,27 +373,24 @@ impl Wallet {
         ))
     }
 
-    fn checked_running_balances(&self) -> Option<Vec<i64>> {
+    fn running_balances_in_range(&self) -> bool {
         if !valid_cents(self.starting_balance_cents)
             || self
                 .entries
                 .iter()
                 .any(|entry| !valid_cents(entry.amount_cents))
         {
-            return None;
+            return false;
         }
 
         let mut balance = self.starting_balance_cents;
-        let mut balances = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
-            balance = balance.checked_add(entry.amount_cents)?;
-            if !valid_cents(balance) {
-                return None;
+            match balance.checked_add(entry.amount_cents) {
+                Some(next) if valid_cents(next) => balance = next,
+                _ => return false,
             }
-            balances.push(balance);
         }
-
-        Some(balances)
+        true
     }
 
     fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
