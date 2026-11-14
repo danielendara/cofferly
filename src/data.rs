@@ -1,6 +1,5 @@
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 
 pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
@@ -258,6 +257,8 @@ impl Wallet {
             })
     }
 
+    /// Rows in date order (Start first, ties by insertion order); balances
+    /// accrue in the same pass.
     fn ledger_rows(&self) -> Vec<LedgerRow<'_>> {
         let mut balance = self.starting_balance_cents;
         let mut rows = Vec::with_capacity(self.entries.len() + 1);
@@ -270,19 +271,14 @@ impl Wallet {
             entry_index: None,
         });
 
-        // Balances accrue in date order; rows stay in insertion order.
-        let mut balances = vec![0; self.entries.len()];
         for index in self.chronological_entry_indices() {
-            balance = clamp_cents(balance.saturating_add(self.entries[index].amount_cents));
-            balances[index] = balance;
-        }
-
-        for (index, entry) in self.entries.iter().enumerate() {
+            let entry = &self.entries[index];
+            balance = clamp_cents(balance.saturating_add(entry.amount_cents));
             rows.push(LedgerRow {
                 date: LedgerRowDate::Entry(entry.date),
                 description: &entry.description,
                 amount_cents: entry.amount_cents,
-                balance_cents: balances[index],
+                balance_cents: balance,
                 entry_index: Some(index),
             });
         }
@@ -394,19 +390,11 @@ impl Wallet {
     }
 
     fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
-        let mut rows: Vec<_> = self.ledger_rows().into_iter().enumerate().collect();
-
-        rows.sort_by(|(left_index, left_row), (right_index, right_row)| {
-            let chronological = compare_ledger_row_dates(left_row.date, right_row.date)
-                .then_with(|| left_index.cmp(right_index));
-
-            match sort {
-                LedgerSort::NewestFirst => chronological.reverse(),
-                LedgerSort::OldestFirst => chronological,
-            }
-        });
-
-        rows.into_iter().map(|(_, row)| row).collect()
+        let mut rows = self.ledger_rows();
+        if sort == LedgerSort::NewestFirst {
+            rows.reverse();
+        }
+        rows
     }
 
     pub fn ledger_rows_sorted_owned(&self, sort: LedgerSort) -> Vec<OwnedLedgerRow> {
@@ -529,17 +517,6 @@ pub fn ledger_filter_summary<'a>(
         rows: filtered,
         matching_entry_count,
         matching_net_cents,
-    }
-}
-
-fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
-    match (left, right) {
-        (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
-        (LedgerRowDate::Start, LedgerRowDate::Entry(_)) => Ordering::Less,
-        (LedgerRowDate::Entry(_), LedgerRowDate::Start) => Ordering::Greater,
-        (LedgerRowDate::Entry(left_date), LedgerRowDate::Entry(right_date)) => {
-            left_date.cmp(&right_date)
-        }
     }
 }
 
