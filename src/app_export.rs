@@ -1,4 +1,4 @@
-//! Print and CSV export methods for [`CofferlyApp`], split out of `main.rs`.
+//! Print and CSV export methods for [`CofferlyApp`].
 
 use super::*;
 
