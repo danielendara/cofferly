@@ -2198,23 +2198,11 @@ impl CofferlyApp {
         self.save_with_success_or_restore(format!("Added wallet for {name}."), snapshot);
     }
 
-    fn newest_entry_index(entries: &[Entry]) -> Option<usize> {
-        entries
-            .iter()
-            .enumerate()
-            .max_by(|(left_index, left), (right_index, right)| {
-                left.date
-                    .cmp(&right.date)
-                    .then_with(|| left_index.cmp(right_index))
-            })
-            .map(|(index, _)| index)
-    }
-
     /// What "Remove latest entry" would take out, as the ledger shows it.
     /// Uses the same pick as the removal (newest by date, then list order).
     fn latest_entry_preview(&self) -> Option<String> {
-        let entries = &self.selected_wallet().entries;
-        let entry = &entries[Self::newest_entry_index(entries)?];
+        let wallet = self.selected_wallet();
+        let entry = &wallet.entries[wallet.newest_entry_index()?];
         Some(format!(
             "{} · {} · {}",
             format_ledger_date(entry.date),
@@ -2233,7 +2221,7 @@ impl CofferlyApp {
         self.prompts.dismiss_delete_wallet();
 
         let wallet_name = self.selected_wallet().child_name.clone();
-        let index = Self::newest_entry_index(&self.selected_wallet().entries);
+        let index = self.selected_wallet().newest_entry_index();
         if let Some(index) = index {
             let entry = self.selected_wallet_mut().entries.remove(index);
             self.prompts.arm_undo(PendingUndo::Removed(RemovableEntry {
