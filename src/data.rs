@@ -1,6 +1,5 @@
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 
 pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
@@ -258,6 +257,8 @@ impl Wallet {
             })
     }
 
+    /// Rows in date order (Start first, ties by insertion order); balances
+    /// accrue in the same pass.
     fn ledger_rows(&self) -> Vec<LedgerRow<'_>> {
         let mut balance = self.starting_balance_cents;
         let mut rows = Vec::with_capacity(self.entries.len() + 1);
@@ -270,19 +271,14 @@ impl Wallet {
             entry_index: None,
         });
 
-        // Balances accrue in date order; rows stay in insertion order.
-        let mut balances = vec![0; self.entries.len()];
         for index in self.chronological_entry_indices() {
-            balance = clamp_cents(balance.saturating_add(self.entries[index].amount_cents));
-            balances[index] = balance;
-        }
-
-        for (index, entry) in self.entries.iter().enumerate() {
+            let entry = &self.entries[index];
+            balance = clamp_cents(balance.saturating_add(entry.amount_cents));
             rows.push(LedgerRow {
                 date: LedgerRowDate::Entry(entry.date),
                 description: &entry.description,
                 amount_cents: entry.amount_cents,
-                balance_cents: balances[index],
+                balance_cents: balance,
                 entry_index: Some(index),
             });
         }
@@ -357,7 +353,7 @@ impl Wallet {
             // out-of-range goal instead of storing a wrapped value.
             Some(cents) => cents > 0 && valid_cents(cents),
         };
-        goal_ok && self.checked_running_balances().is_some()
+        goal_ok && self.running_balances_in_range()
     }
 
     /// Progress toward [`Self::savings_goal_cents`]. `None` when no positive
@@ -373,43 +369,32 @@ impl Wallet {
         ))
     }
 
-    fn checked_running_balances(&self) -> Option<Vec<i64>> {
+    fn running_balances_in_range(&self) -> bool {
         if !valid_cents(self.starting_balance_cents)
             || self
                 .entries
                 .iter()
                 .any(|entry| !valid_cents(entry.amount_cents))
         {
-            return None;
+            return false;
         }
 
         let mut balance = self.starting_balance_cents;
-        let mut balances = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
-            balance = balance.checked_add(entry.amount_cents)?;
-            if !valid_cents(balance) {
-                return None;
+            match balance.checked_add(entry.amount_cents) {
+                Some(next) if valid_cents(next) => balance = next,
+                _ => return false,
             }
-            balances.push(balance);
         }
-
-        Some(balances)
+        true
     }
 
     fn ledger_rows_sorted(&self, sort: LedgerSort) -> Vec<LedgerRow<'_>> {
-        let mut rows: Vec<_> = self.ledger_rows().into_iter().enumerate().collect();
-
-        rows.sort_by(|(left_index, left_row), (right_index, right_row)| {
-            let chronological = compare_ledger_row_dates(left_row.date, right_row.date)
-                .then_with(|| left_index.cmp(right_index));
-
-            match sort {
-                LedgerSort::NewestFirst => chronological.reverse(),
-                LedgerSort::OldestFirst => chronological,
-            }
-        });
-
-        rows.into_iter().map(|(_, row)| row).collect()
+        let mut rows = self.ledger_rows();
+        if sort == LedgerSort::NewestFirst {
+            rows.reverse();
+        }
+        rows
     }
 
     pub fn ledger_rows_sorted_owned(&self, sort: LedgerSort) -> Vec<OwnedLedgerRow> {
@@ -469,6 +454,18 @@ impl Wallet {
         result
     }
 
+    /// Index of the newest entry: latest date, ties go to the later list index.
+    ///
+    /// This is the ledger's `NewestFirst` order, and the single place that
+    /// rule is written (used by "Remove latest entry" and its preview).
+    pub fn newest_entry_index(&self) -> Option<usize> {
+        self.entries
+            .iter()
+            .enumerate()
+            .max_by_key(|(index, entry)| (entry.date, *index))
+            .map(|(index, _)| index)
+    }
+
     /// The most recently recorded deposit, for "Repeat last deposit" prefill.
     ///
     /// A deposit is any entry with a positive `amount_cents`. Newest is chosen
@@ -520,17 +517,6 @@ pub fn ledger_filter_summary<'a>(
         rows: filtered,
         matching_entry_count,
         matching_net_cents,
-    }
-}
-
-fn compare_ledger_row_dates(left: LedgerRowDate, right: LedgerRowDate) -> Ordering {
-    match (left, right) {
-        (LedgerRowDate::Start, LedgerRowDate::Start) => Ordering::Equal,
-        (LedgerRowDate::Start, LedgerRowDate::Entry(_)) => Ordering::Less,
-        (LedgerRowDate::Entry(_), LedgerRowDate::Start) => Ordering::Greater,
-        (LedgerRowDate::Entry(left_date), LedgerRowDate::Entry(right_date)) => {
-            left_date.cmp(&right_date)
-        }
     }
 }
 
@@ -1141,6 +1127,31 @@ mod tests {
         let latest = wallet.latest_deposit().unwrap();
         assert_eq!(latest.description, "Bonus chore");
         assert_eq!(latest.amount_cents, 300);
+    }
+
+    #[test]
+    fn newest_entry_index_handles_backdated_entries_and_same_day_ties() {
+        let entry = |d: u32, desc: &str| Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, d).unwrap(),
+            description: desc.to_owned(),
+            amount_cents: 100,
+        };
+        let mut wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        };
+        assert_eq!(wallet.newest_entry_index(), None);
+
+        // Backdated entry added last is not the newest.
+        wallet.entries = vec![entry(10, "a"), entry(8, "backdated")];
+        assert_eq!(wallet.newest_entry_index(), Some(0));
+
+        // Same-day tie goes to the later-added entry.
+        wallet.entries = vec![entry(10, "a"), entry(8, "b"), entry(10, "c")];
+        assert_eq!(wallet.newest_entry_index(), Some(2));
     }
 
     mod weekly_allowance {
