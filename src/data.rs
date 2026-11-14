@@ -466,6 +466,18 @@ impl Wallet {
         result
     }
 
+    /// Index of the newest entry: latest date, ties go to the later list index.
+    ///
+    /// This is the ledger's `NewestFirst` order, and the single place that
+    /// rule is written (used by "Remove latest entry" and its preview).
+    pub fn newest_entry_index(&self) -> Option<usize> {
+        self.entries
+            .iter()
+            .enumerate()
+            .max_by_key(|(index, entry)| (entry.date, *index))
+            .map(|(index, _)| index)
+    }
+
     /// The most recently recorded deposit, for "Repeat last deposit" prefill.
     ///
     /// A deposit is any entry with a positive `amount_cents`. Newest is chosen
@@ -1138,6 +1150,31 @@ mod tests {
         let latest = wallet.latest_deposit().unwrap();
         assert_eq!(latest.description, "Bonus chore");
         assert_eq!(latest.amount_cents, 300);
+    }
+
+    #[test]
+    fn newest_entry_index_handles_backdated_entries_and_same_day_ties() {
+        let entry = |d: u32, desc: &str| Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, d).unwrap(),
+            description: desc.to_owned(),
+            amount_cents: 100,
+        };
+        let mut wallet = Wallet {
+            child_name: "Child 1".to_owned(),
+            starting_balance_cents: 0,
+            entries: Vec::new(),
+            weekly_allowance: None,
+            savings_goal_cents: None,
+        };
+        assert_eq!(wallet.newest_entry_index(), None);
+
+        // Backdated entry added last is not the newest.
+        wallet.entries = vec![entry(10, "a"), entry(8, "backdated")];
+        assert_eq!(wallet.newest_entry_index(), Some(0));
+
+        // Same-day tie goes to the later-added entry.
+        wallet.entries = vec![entry(10, "a"), entry(8, "b"), entry(10, "c")];
+        assert_eq!(wallet.newest_entry_index(), Some(2));
     }
 
     mod weekly_allowance {
