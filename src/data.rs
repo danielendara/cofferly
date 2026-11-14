@@ -1,6 +1,5 @@
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 
 pub const DEFAULT_PARENT_PIN: &str = "1234";
 pub const DEFAULT_CHILD_NAMES: [&str; 2] = ["Child 1", "Child 2"];
