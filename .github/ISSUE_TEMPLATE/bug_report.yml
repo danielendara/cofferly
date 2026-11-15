@@ -5,7 +5,87 @@ labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: "Please do not include real child names, private ledger data, or screenshots containing family information."
+      value: |
+        ## Purpose
+
+        Please do not include real child names, private ledger data, or screenshots containing family information.
+  - type: textarea
+    id: why-it-matters
+    attributes:
+      label: Why it matters
+      description: One plain sentence about the user or operational risk.
+    validations:
+      required: true
+  - type: dropdown
+    id: value
+    attributes:
+      label: Value
+      options:
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+  - type: textarea
+    id: value-detail
+    attributes:
+      label: What we gain or avoid
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options:
+        - XS
+        - S
+        - M
+    validations:
+      required: true
+  - type: textarea
+    id: expected-outcome
+    attributes:
+      label: Expected outcome
+      description: What will be true when done, in everyday words.
+    validations:
+      required: true
+  - type: textarea
+    id: how-well-know
+    attributes:
+      label: How we'll know it worked
+      description: What a person can see or do; not the test command.
+    validations:
+      required: true
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause
+      description: Name the cause, not just the symptom.
+  - type: textarea
+    id: pattern-to-follow
+    attributes:
+      label: Pattern to follow
+      description: Existing file or helper the fix should follow. If none exists, say so, and say which pattern this fix establishes.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: What must be true for this to be done.
+  - type: textarea
+    id: proof-required
+    attributes:
+      label: Proof required
+      description: What evidence the PR should attach.
   - type: textarea
     id: what-happened
     attributes:
@@ -31,4 +111,3 @@ body:
       placeholder: "1. Open Cofferly..."
     validations:
       required: true
-
