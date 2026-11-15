@@ -2,6 +2,10 @@
 
 Cofferly: local-only allowance wallet for kids. Rust + eframe/egui desktop app, encrypted vault, no network.
 
+## Purpose and Proof
+
+Every agent-filed issue and every PR starts with the Purpose block from `.github` templates (plain language, before technical detail). Dependabot and one-line chores are exempt. Gabriel HOLDs a missing or vague block.
+
 ## Commands
 - Format: `cargo fmt -- --check`
 - Lint: `cargo clippy --all-targets --locked -- -D warnings`

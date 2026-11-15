@@ -6,6 +6,68 @@ body:
   - type: markdown
     attributes:
       value: "Please do not include real child names, private ledger data, or screenshots containing family information."
+  - type: markdown
+    attributes:
+      value: |
+        ## Purpose
+        Fill this in plain language before the technical detail. The filer drafts Value and Priority; Gabriel confirms them at value-check.
+  - type: textarea
+    id: purpose-why
+    attributes:
+      label: Why it matters
+      description: One plain sentence about user impact or operational risk.
+    validations:
+      required: true
+  - type: dropdown
+    id: purpose-value
+    attributes:
+      label: Value
+      options:
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+  - type: textarea
+    id: purpose-value-detail
+    attributes:
+      label: Value — what we gain or avoid
+    validations:
+      required: true
+  - type: dropdown
+    id: purpose-priority
+    attributes:
+      label: Priority
+      options:
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
+  - type: dropdown
+    id: purpose-size
+    attributes:
+      label: Size
+      options:
+        - XS
+        - S
+        - M
+    validations:
+      required: true
+  - type: textarea
+    id: purpose-outcome
+    attributes:
+      label: Expected outcome
+      description: What will be true when done, in everyday words.
+    validations:
+      required: true
+  - type: textarea
+    id: purpose-how-we-know
+    attributes:
+      label: How we'll know it worked
+      description: What a person can see or do, not a test command.
+    validations:
+      required: true
   - type: textarea
     id: what-happened
     attributes:
