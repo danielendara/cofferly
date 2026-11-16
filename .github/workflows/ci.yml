@@ -40,6 +40,10 @@ jobs:
           chmod +x scripts/check-docs.sh
           ./scripts/check-docs.sh
 
+      - name: Workflow security checks
+        if: runner.os == 'Linux'
+        run: python3 scripts/check_security_workflows.py
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
