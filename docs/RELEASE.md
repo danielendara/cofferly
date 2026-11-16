@@ -39,7 +39,7 @@ The repository includes `installer/Cofferly.iss` for Inno Setup.
 
 ### CI (preferred)
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the portable zip, compiles the installer with Inno Setup, and attaches both to the GitHub Release. Starting the workflow manually via `workflow_dispatch` builds the same artifacts without attaching them to a Release (build artifacts only). The version is resolved once per run: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
+Pushing a `v*` tag runs `.github/workflows/release.yml`. A read-only `windows` job builds the portable zip and compiles the installer with Inno Setup, then uploads them as workflow artifacts; a separate `publish` job (tag pushes only) downloads those artifacts and attaches them to the GitHub Release. Starting the workflow manually via `workflow_dispatch` runs the build job only (artifacts, no Release attach). The version is resolved once per run in the build job: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
 
 ### Local
 
