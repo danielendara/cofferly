@@ -13,8 +13,6 @@ jobs:
   windows:
     name: Windows build
     runs-on: windows-latest
-    outputs:
-      version: ${{ steps.resolve-version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -94,10 +92,12 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: Cofferly-windows-x64
+          path: dist
 
       - name: Attach assets to GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
+          fail_on_unmatched_files: true
           files: |
             dist/*.zip
             dist/*Setup.exe
