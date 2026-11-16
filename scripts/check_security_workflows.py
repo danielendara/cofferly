@@ -17,7 +17,6 @@ WORKFLOWS = (
     ROOT / ".github/workflows/ci.yml",
     ROOT / ".github/workflows/release.yml",
 )
-RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
 BUILD_JOB = "windows"
 PUBLISH_JOB = "publish"
 FORBIDDEN_PUBLISH_USES = (
