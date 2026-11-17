@@ -4,7 +4,8 @@
 # coverage gate, GUI smoke (the app's own capture mode under a virtual display).
 # Usage: scripts/verify.sh
 # Audit step needs network (RustSec advisory DB). Install: cargo install cargo-audit --locked
-# Step 8/8 needs xkbcommon-x11 + a Vulkan ICD (lavapipe). If missing, see the verify-cofferly skill "Headless libs".
+# Step 8/8 on Linux needs xkbcommon-x11 + a Vulkan ICD (lavapipe). If missing, see the verify-cofferly skill "Headless libs".
+# On macOS it opens the app window for a moment (it uses the real window server).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -90,14 +91,26 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cargo build --release --locked
 run=("target/release/Cofferly")
-if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+# macOS and Windows have a window server without DISPLAY/WAYLAND_DISPLAY; only Linux needs
+# a virtual display when neither is set.
+if [[ "$(uname -s)" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   command -v xvfb-run >/dev/null || { echo "no display and no xvfb-run"; exit 1; }
   run=(xvfb-run -a "${run[@]}")
 fi
+# `timeout` is GNU coreutils: absent on stock macOS (`gtimeout` with Homebrew coreutils).
+# perl ships with macOS and gives the same hard limit.
+if command -v timeout >/dev/null; then
+  limit=(timeout 180)
+elif command -v gtimeout >/dev/null; then
+  limit=(gtimeout 180)
+else
+  limit=(perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' 180)
+fi
 mkdir -p "$tmp/data" "$tmp/out"
 COFFERLY_DATA_DIR="$tmp/data" COFFERLY_CAPTURE=story-unlock COFFERLY_CAPTURE_DIR="$tmp/out" \
-  timeout 180 "${run[@]}"
+  "${limit[@]}" "${run[@]}"
 test -s "$tmp/out/cofferly-story-unlock.png" || { echo "screenshot missing"; exit 1; }
-echo "smoke OK: $(stat -c %s "$tmp/out/cofferly-story-unlock.png") byte screenshot"
+# `wc -c` instead of `stat -c %s`: the stat flags differ between GNU and BSD.
+echo "smoke OK: $(wc -c <"$tmp/out/cofferly-story-unlock.png" | tr -d ' ') byte screenshot"
 
 echo; echo "VERIFY PASSED"
