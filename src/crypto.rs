@@ -350,4 +350,51 @@ mod tests {
         let (plain2, _) = decrypt(&rewrapped, "2222").unwrap();
         assert_eq!(plain2.as_slice(), data);
     }
+
+    /// A version 3 vault written by this code on 2026-11-16 from a fixed test story.
+    ///
+    /// Every other test encrypts and decrypts with the same build, so they all still pass
+    /// if the Argon2id parameters, the envelope layout, the cipher or the story encoding
+    /// change. Families' real vaults would stop opening. This blob is the only thing that
+    /// plays the part of a file already on disk.
+    ///
+    /// If this test fails, the on-disk format changed. Do not regenerate the blob: add a
+    /// new format version and keep reading this one.
+    const GOLDEN_V3_VAULT_HEX: &str = "\
+         034e395f65d147623b01be735e127588034ff43527434f9b36a8dcc96ebd1c26\
+         f389c594b686dd6beb7bb19aa492b530b1fda767acacf9c3c5a0ffbff917c01a\
+         6205127f09f80b038ea57dd0a5dcd465fb784c429e959584c16e41562f356bd0\
+         78f2ea4257471996fe02c6cef862820a505a1b508789239216d279d143df91b6\
+         d6e218e2f7598d5ed37c92e06a4d8da2db875c5756a5cf7a81";
+    const GOLDEN_V3_STORY: [&str; 6] = ["acorn", "anchor", "apple", "balloon", "book", "bridge"];
+    const GOLDEN_V3_PLAINTEXT: &[u8] = b"cofferly golden vault v3";
+
+    fn bytes_from_hex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn golden_v3_vault_written_by_an_earlier_build_still_opens() {
+        let vault = bytes_from_hex(GOLDEN_V3_VAULT_HEX);
+        assert_eq!(vault[0], STORY_VERSION);
+        let story = crate::story::encode(&GOLDEN_V3_STORY).unwrap();
+        assert_eq!(
+            story.as_str(),
+            "coffer-story-v1:acorn/anchor/apple/balloon/book/bridge"
+        );
+
+        let (plaintext, session) = decrypt(&vault, &story).unwrap();
+        assert_eq!(plaintext.as_slice(), GOLDEN_V3_PLAINTEXT);
+
+        // A save from the unlocked session keeps the header, so the next unlock needs the
+        // same story and no re-derivation: the first 89 bytes must be carried over as-is.
+        let mut session = Some(session);
+        let resaved = encrypt(GOLDEN_V3_PLAINTEXT, &story, &mut session).unwrap();
+        let header_len = 1 + SALT_LEN + NONCE_LEN + WRAPPED_KEY_LEN;
+        assert_eq!(header_len, 89);
+        assert_eq!(&resaved[..header_len], &vault[..header_len]);
+    }
 }
