@@ -103,7 +103,7 @@ Before publishing, open Cofferly and verify:
 - Starting-balance Save stays disabled until the opening amount actually changes.
 - Parent mode shows a quiet “Locks in …” countdown in the last two minutes of inactivity.
 - The first two wrong Coffer Story (or PIN) attempts do not start a cooldown; a third does.
-- Undo last pick and Cancel/Back work during story setup and story change.
+- **Remove last** (undoes the most recent pick) and Cancel/Back work during story setup and story change.
 - Already-picked story objects are greyed out and ignored.
 - Print recovery card opens a local HTML card during story setup.
 - With three or more wallets, the selected wallet is the same after restart.

@@ -25,7 +25,7 @@ That script runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, format
 
 If `cargo` is not on PATH on Windows, add `%USERPROFILE%\.cargo\bin` to PATH or run Cargo from that folder.
 
-GitHub Actions CI is necessary but not sufficient: it does not run the full `scripts/verify.sh` gate (for example, no merge-blocking coverage floor or GUI smoke on every PR). CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, `cargo fmt`, and `cargo clippy`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**). The **Coverage** job is informational and is not merge-blocking.
+GitHub Actions CI is necessary but not sufficient: it does not run the full `scripts/verify.sh` gate (for example, no merge-blocking coverage floor or GUI smoke on every PR). CI runs `cargo test --locked` on Linux, macOS, and Windows. On **ubuntu-latest** only, the `Test` job also runs `scripts/check-vault-paths.sh`, `scripts/check-docs.sh`, `python3 scripts/check_security_workflows.py` (not part of `scripts/verify.sh`), `cargo fmt`, and `cargo clippy`. Separate jobs on **ubuntu-latest** run the coverage floor (`cargo llvm-cov`, job name **Coverage**) and `cargo audit` (job name **Security audit**). The **Coverage** job is informational and is not merge-blocking.
 
 ## Pull Request Checklist
 
