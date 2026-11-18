@@ -8,6 +8,8 @@ body:
       value: |
         ## Purpose
 
+        The fields below (why it matters, value, priority, size, expected outcome) are the Purpose block for this issue.
+
         Please open an issue before starting larger work. Features that add accounts, cloud sync, telemetry, ads, or networking need maintainer approval first.
   - type: textarea
     id: why-it-matters

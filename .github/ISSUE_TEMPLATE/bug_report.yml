@@ -8,6 +8,8 @@ body:
       value: |
         ## Purpose
 
+        The fields below (why it matters, value, priority, size, expected outcome) are the Purpose block for this issue.
+
         Please do not include real child names, private ledger data, or screenshots containing family information.
   - type: textarea
     id: why-it-matters
