@@ -585,7 +585,7 @@ pub fn valid_description(desc: &str) -> bool {
 }
 
 fn description_char_count(desc: &str) -> usize {
-    desc.chars().count()
+    desc.trim().chars().count()
 }
 
 pub fn description_length_label(desc: &str) -> String {
@@ -697,6 +697,17 @@ mod tests {
         assert!(valid_cents(-MAX_ABSOLUTE_CENTS));
         assert!(!valid_cents(MAX_ABSOLUTE_CENTS + 1));
         assert!(!valid_cents(-(MAX_ABSOLUTE_CENTS + 1)));
+    }
+
+    #[test]
+    fn description_length_label_counts_trimmed_text_like_validation() {
+        let core = "a".repeat(MAX_DESCRIPTION_CHARS);
+        let padded = format!("  {core}  ");
+        assert!(valid_description(&padded));
+        assert_eq!(
+            description_length_label(&padded),
+            format!("{MAX_DESCRIPTION_CHARS}/100")
+        );
     }
 
     #[test]
