@@ -1534,18 +1534,24 @@ impl CofferlyApp {
             EntryKind::Deposit => "Added",
             EntryKind::Deduction => "Deducted",
         };
-        if self.draft.kind == EntryKind::Deduction {
-            let next_balance = self
-                .selected_wallet()
-                .current_balance_cents()
-                .saturating_sub(amount);
-            if next_balance < 0 && !self.prompts.spend_anyway_is(amount) {
+        if self.draft.kind == EntryKind::Deduction && !self.prompts.spend_anyway_is(amount) {
+            let wallet = self.selected_wallet();
+            let next_balance = wallet.current_balance_cents().saturating_sub(amount);
+            if next_balance < 0 || wallet.goes_negative_if_added(date, signed_amount) {
+                let status = if next_balance < 0 {
+                    format!(
+                        "This spending would leave {} at {}. Submit again to confirm.",
+                        wallet.child_name,
+                        format_money(next_balance),
+                    )
+                } else {
+                    format!(
+                        "This spending would leave {} below zero at that point in the ledger. Submit again to confirm.",
+                        wallet.child_name,
+                    )
+                };
                 self.prompts.arm_spend_anyway(amount);
-                self.set_status_info(format!(
-                    "This spending would leave {} at {}. Submit again to confirm.",
-                    self.selected_wallet().child_name,
-                    format_money(next_balance),
-                ));
+                self.set_status_info(status);
                 return;
             }
         }
