@@ -2165,7 +2165,8 @@ fn remove_latest_entry_removes_newest_by_date_not_append_order() {
 
 #[test]
 fn latest_entry_preview_names_the_entry_remove_latest_will_remove() {
-    let (mut app, _dir) = test_app();
+    let (mut app, dir) = test_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
     assert!(app.latest_entry_preview().is_none());
 
     let today = Local::now().date_naive();
@@ -2179,6 +2180,8 @@ fn latest_entry_preview_names_the_entry_remove_latest_will_remove() {
     app.draft.description = "Comic book".to_owned();
     app.draft.amount = "3".to_owned();
     app.draft.date_input = format_ledger_date(today - chrono::Duration::days(7));
+    app.add_entry();
+    assert!(app.prompts.spend_anyway_is(300));
     app.add_entry();
 
     assert_eq!(app.selected_wallet().entries.len(), 2);
@@ -2308,6 +2311,43 @@ fn money_out_that_would_go_negative_asks_confirm_before_commit() {
     assert_eq!(app.selected_wallet().current_balance_cents(), -500);
     assert!(!app.prompts.spend_anyway_pending());
     assert!(app.status.text.contains("Deducted $5.00"));
+    assert_eq!(app.status.severity, StatusSeverity::Success);
+}
+
+#[test]
+fn backdated_money_out_that_goes_negative_mid_ledger_asks_first() {
+    let (mut app, dir) = test_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    let deposit_date = Local::now().date_naive();
+    let spend_date = deposit_date.pred_opt().unwrap();
+    app.selected_wallet_mut().entries.push(Entry {
+        date: deposit_date,
+        description: "Allowance".to_owned(),
+        amount_cents: 1_000,
+    });
+    app.draft.kind = EntryKind::Deduction;
+    app.draft.description = "Snack".to_owned();
+    app.draft.amount = "5".to_owned();
+    app.draft.date_input = spend_date.to_string();
+
+    app.add_entry();
+
+    assert_eq!(app.selected_wallet().entries.len(), 1);
+    assert_eq!(app.selected_wallet().current_balance_cents(), 1_000);
+    assert!(app.prompts.spend_anyway_is(500));
+    assert_eq!(app.status.severity, StatusSeverity::Info);
+    assert!(app
+        .status
+        .text
+        .contains("below zero at that point in the ledger"));
+
+    app.add_entry();
+
+    assert_eq!(app.selected_wallet().entries.len(), 2);
+    assert_eq!(app.selected_wallet().entries[1].date, spend_date);
+    assert_eq!(app.selected_wallet().entries[1].amount_cents, -500);
+    assert_eq!(app.selected_wallet().current_balance_cents(), 500);
+    assert!(!app.prompts.spend_anyway_pending());
     assert_eq!(app.status.severity, StatusSeverity::Success);
 }
 
