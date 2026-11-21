@@ -41,7 +41,6 @@ fn has_label(harness: &AppHarness, label: &str) -> bool {
 }
 
 fn click(harness: &mut AppHarness, label: &str) {
-    println!("  click  {label:?}");
     harness.get_by_label(label).click();
     // Let the click land and the resulting screen lay out before the next query.
     for _ in 0..4 {
@@ -119,6 +118,58 @@ fn button_with_prefix(harness: &AppHarness, prefix: &str) -> Option<String> {
         .query_all_by_role(Role::Button)
         .filter_map(|node| node.accesskit_node().label())
         .find(|label| label.starts_with(prefix))
+}
+
+fn change_story_from_settings(harness: &mut AppHarness) {
+    harness.get_by_label("Change Coffer Story").scroll_to_me();
+    harness.run();
+    click(harness, "Change Coffer Story");
+    click(harness, "I wrote it down — continue");
+    let replacement = harness
+        .state()
+        .pending_story
+        .expect("generated replacement");
+    click_story(harness, replacement);
+    step_until(harness, "story change to finish", |h| {
+        has_label(h, "Settings")
+    });
+    click(harness, "Settings");
+    assert!(label_containing(
+        harness,
+        "Make a fresh backup in Settings → Backup."
+    ));
+}
+
+#[test]
+fn journey_settings_warns_about_the_last_backup_until_a_fresh_copy_is_saved() {
+    let dir = TempDir::new().unwrap();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    let mut h = harness();
+    first_run_setup(&mut h);
+
+    click(&mut h, "Settings");
+    change_story_from_settings(&mut h);
+    assert!(has_label(&h, "Never backed up"));
+    assert!(!label_containing(&h, "uses your previous Coffer Story"));
+
+    h.state_mut()
+        .back_up_vault_to(dir.path().join("first-copy.cofferly"), false);
+    h.run();
+    let date = h.state().last_backup.clone().expect("backup date");
+    assert!(has_label(&h, &format!("Last backup: {date}")));
+
+    change_story_from_settings(&mut h);
+    assert!(has_label(
+        &h,
+        &format!("Last backup: {date} (uses your previous Coffer Story). Back up again.")
+    ));
+
+    h.state_mut()
+        .back_up_vault_to(dir.path().join("fresh-copy.cofferly"), false);
+    h.run();
+    let date = h.state().last_backup.as_deref().expect("fresh backup date");
+    assert!(has_label(&h, &format!("Last backup: {date}")));
+    assert!(!label_containing(&h, "uses your previous Coffer Story"));
 }
 
 #[test]

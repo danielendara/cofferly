@@ -1079,15 +1079,19 @@ impl CofferlyApp {
                             egui::Stroke::new(1.0, theme::BORDER),
                             theme::TEXT_PRIMARY,
                             |ui| {
-                                let last_backup = match &self.last_backup {
-                                    Some(date) => format!("Last backup: {date}"),
-                                    None => "Never backed up".to_owned(),
+                                let (last_backup, color) = match &self.last_backup {
+                                    Some(date) if self.last_backup_predates_story => (
+                                        format!("Last backup: {date} (uses your previous Coffer Story). Back up again."),
+                                        theme::NEGATIVE,
+                                    ),
+                                    Some(date) => (format!("Last backup: {date}"), theme::TEXT_PRIMARY),
+                                    None => ("Never backed up".to_owned(), theme::TEXT_PRIMARY),
                                 };
                                 ui.label(
                                     egui::RichText::new(last_backup)
                                         .size(12.0)
                                         .strong()
-                                        .color(theme::TEXT_PRIMARY),
+                                        .color(color),
                                 );
                                 ui.label(
                                     egui::RichText::new(

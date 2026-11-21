@@ -237,6 +237,8 @@ struct UiState {
     /// `#[serde(default)]` so older state without it reads as "Never backed up".
     #[serde(default)]
     last_backup: Option<String>,
+    #[serde(default)]
+    last_backup_predates_story: bool,
 }
 
 /// A backup chosen for restore. Nothing on disk changes until its
@@ -337,6 +339,7 @@ pub(crate) struct CofferlyApp {
     temp_artifact_paths: Vec<PathBuf>,
     /// Date of the last verified backup, persisted via `UiState`.
     last_backup: Option<String>,
+    last_backup_predates_story: bool,
     /// Restore in progress; drives the lock screen while `Some`.
     restore: Option<PendingRestore>,
 }
@@ -567,6 +570,7 @@ impl CofferlyApp {
             capturing: std::env::var_os("COFFERLY_CAPTURE").is_some(),
             temp_artifact_paths: Vec::new(),
             last_backup: restored.last_backup_date,
+            last_backup_predates_story: restored.last_backup_predates_story,
             restore: None,
         }
     }
@@ -1255,27 +1259,22 @@ impl CofferlyApp {
                 self.reset_pin_failures();
                 self.set_status_ok("Coffer Story saved. Parent mode unlocked.");
             }
-            LockMode::MigrateConfirm => {
+            LockMode::MigrateConfirm | LockMode::ChangeConfirm => {
                 self.data.parent_pin.clear();
                 self.parent_unlocked = true;
                 self.lock_mode = LockMode::Story;
                 self.pending_story = None;
                 self.reset_story_entry();
                 self.reset_pin_failures();
-                self.set_status_ok(
-                    "Coffer Story enrolled. Legacy PIN no longer unlocks this file.",
-                );
-            }
-            LockMode::ChangeConfirm => {
-                self.data.parent_pin.clear();
-                self.parent_unlocked = true;
-                self.lock_mode = LockMode::Story;
-                self.pending_story = None;
-                self.reset_story_entry();
-                self.reset_pin_failures();
-                self.set_status_ok(
-                    "Coffer Story changed. The previous story no longer unlocks this file.",
-                );
+                self.last_backup_predates_story = self.last_backup.is_some();
+                let message = if success.lock_mode == LockMode::MigrateConfirm {
+                    "Coffer Story enrolled. Legacy PIN no longer unlocks this file."
+                } else {
+                    "Coffer Story changed. The previous story no longer unlocks this file."
+                };
+                self.set_status_ok(format!(
+                    "{message} Make a fresh backup in Settings → Backup."
+                ));
             }
             _ => {}
         }
@@ -2409,6 +2408,7 @@ impl CofferlyApp {
         match io::write_backup(&dest, &vault, replace_existing) {
             Ok(()) => {
                 self.last_backup = Some(format_ledger_date(Local::now().date_naive()));
+                self.last_backup_predates_story = false;
                 self.set_status_ok(format!(
                     "Backed up the encrypted vault to {} and verified the copy.",
                     dest.display()
@@ -2659,6 +2659,7 @@ impl eframe::App for CofferlyApp {
             ledger_sort_newest_first: matches!(self.ledger_sort, LedgerSort::NewestFirst),
             last_entry_kind: self.draft.kind,
             last_backup: self.last_backup.clone(),
+            last_backup_predates_story: self.last_backup_predates_story,
         };
         eframe::set_value(storage, UI_STATE_KEY, &state);
     }
@@ -3027,6 +3028,7 @@ struct RestoredUiState {
     ledger_sort: LedgerSort,
     entry_kind: EntryKind,
     last_backup_date: Option<String>,
+    last_backup_predates_story: bool,
 }
 
 impl Default for RestoredUiState {
@@ -3036,6 +3038,7 @@ impl Default for RestoredUiState {
             ledger_sort: LedgerSort::NewestFirst,
             entry_kind: EntryKind::default(),
             last_backup_date: None,
+            last_backup_predates_story: false,
         }
     }
 }
@@ -3059,6 +3062,7 @@ fn restore_ui_state(storage: Option<&dyn eframe::Storage>, wallet_count: usize) 
         ledger_sort,
         entry_kind: state.last_entry_kind,
         last_backup_date: state.last_backup,
+        last_backup_predates_story: state.last_backup_predates_story,
     }
 }
 
