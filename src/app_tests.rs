@@ -57,6 +57,7 @@ fn test_app() -> (CofferlyApp, TempDir) {
         capturing: false,
         temp_artifact_paths: Vec::new(),
         last_backup: None,
+        last_backup_predates_story: false,
         restore: None,
     };
     (app, dir)
@@ -152,7 +153,9 @@ fn all_six_story_selections_remain_visible_while_unlocking() {
 
 #[test]
 fn legacy_pin_migration_preserves_data_and_rejects_the_old_pin() {
-    let (mut app, _dir) = test_app();
+    let (mut app, dir) = test_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    app.last_backup = Some("11/18/2026".to_owned());
     let mut legacy_data = default_app_data();
     legacy_data.wallets[0].child_name = "Kept through migration".to_owned();
     let mut legacy_session = None;
@@ -180,6 +183,11 @@ fn legacy_pin_migration_preserves_data_and_rejects_the_old_pin() {
     app.submit_story();
     finish_background_work(&mut app);
 
+    assert!(app.last_backup_predates_story);
+    assert!(app
+        .status
+        .text
+        .contains("Make a fresh backup in Settings → Backup."));
     let migrated = std::fs::read(&app.data_path).unwrap();
     assert_eq!(migrated[0], crypto::STORY_VERSION);
     assert!(crypto::decrypt(&migrated, "1234").is_err());
@@ -191,7 +199,9 @@ fn legacy_pin_migration_preserves_data_and_rejects_the_old_pin() {
 
 #[test]
 fn changing_story_rewraps_the_existing_data_key() {
-    let (mut app, _dir) = test_app();
+    let (mut app, dir) = test_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    app.last_backup = Some("11/18/2026".to_owned());
     let old_story = test_story();
     let old_secret = story::encode(&old_story).unwrap();
     let mut original_session = None;
@@ -219,6 +229,33 @@ fn changing_story_rewraps_the_existing_data_key() {
     let replacement_secret = story::encode(&replacement).unwrap();
     assert!(crypto::decrypt(&changed, &replacement_secret).is_ok());
     assert!(app.parent_unlocked);
+    assert!(app.last_backup_predates_story);
+    assert!(app
+        .status
+        .text
+        .contains("Make a fresh backup in Settings → Backup."));
+}
+
+#[test]
+fn failed_story_change_save_keeps_the_last_backup_current() {
+    let (mut app, dir, _) = unlocked_story_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    app.last_backup = Some("11/18/2026".to_owned());
+    app.data_path = unwritable_data_path(&dir);
+    app.parent_unlocked = false;
+    app.lock_mode = LockMode::ChangeConfirm;
+    app.pending_story = Some(BACKUP_STORY);
+    app.story_selections = BACKUP_STORY.into();
+
+    app.submit_story();
+    finish_background_work(&mut app);
+
+    assert!(app
+        .status
+        .text
+        .starts_with("Could not save the new Coffer Story:"));
+    assert_eq!(app.last_backup.as_deref(), Some("11/18/2026"));
+    assert!(!app.last_backup_predates_story);
 }
 
 #[cfg(unix)]
@@ -691,6 +728,7 @@ fn picking_an_already_chosen_story_object_is_ignored() {
 #[test]
 fn cancel_story_change_restores_unlocked_parent_mode_without_touching_the_vault() {
     let (mut app, _dir) = test_app();
+    app.last_backup = Some("11/18/2026".to_owned());
     app.lock_mode = LockMode::ChangeConfirm;
     app.parent_unlocked = false;
     app.pending_story = Some(test_story());
@@ -702,6 +740,8 @@ fn cancel_story_change_restores_unlocked_parent_mode_without_touching_the_vault(
     assert!(app.parent_unlocked);
     assert!(app.pending_story.is_none());
     assert!(app.story_selections.is_empty());
+    assert_eq!(app.last_backup.as_deref(), Some("11/18/2026"));
+    assert!(!app.last_backup_predates_story);
 }
 
 #[test]
@@ -817,6 +857,9 @@ fn unlocked_story_app() -> (CofferlyApp, TempDir, Vec<u8>) {
 #[test]
 fn backup_writes_a_verified_copy_and_remembers_the_date() {
     let (mut app, dir, current) = unlocked_story_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
+    app.last_backup = Some("11/18/2026".to_owned());
+    app.last_backup_predates_story = true;
     let dest = dir.path().join("Cofferly-backup-2026-09-03.cofferly");
 
     app.back_up_vault_to(dest.clone(), false);
@@ -828,6 +871,7 @@ fn backup_writes_a_verified_copy_and_remembers_the_date() {
         app.last_backup,
         Some(format_ledger_date(Local::now().date_naive()))
     );
+    assert!(!app.last_backup_predates_story);
 }
 
 #[test]
@@ -1035,15 +1079,34 @@ fn cancelling_a_fresh_install_restore_returns_to_the_new_story() {
 }
 
 #[test]
-fn last_backup_date_persists_through_save() {
-    let (mut app, _dir) = test_app();
+fn last_backup_warning_persists_through_relaunch() {
+    let (mut app, dir) = test_app();
+    let _data_dir = ScopedDataDir::set(dir.path());
     app.last_backup = Some("2026-09-03".to_owned());
+    app.last_backup_predates_story = true;
     let mut storage = FakeStorage::default();
 
     app.save(&mut storage);
 
-    let state = eframe::get_value::<UiState>(&storage, UI_STATE_KEY).unwrap();
-    assert_eq!(state.last_backup.as_deref(), Some("2026-09-03"));
+    let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+    cc.storage = Some(&storage);
+    let relaunched = CofferlyApp::new(&cc);
+    assert_eq!(relaunched.last_backup.as_deref(), Some("2026-09-03"));
+    assert!(relaunched.last_backup_predates_story);
+}
+
+#[test]
+fn older_ui_state_restores_backup_date_without_a_warning() {
+    let mut storage = FakeStorage::default();
+    storage.set_string(
+        UI_STATE_KEY,
+        r#"(selected_wallet:0,ledger_sort_newest_first:true,last_backup:Some("11/18/2026"))"#
+            .to_owned(),
+    );
+
+    let restored = restore_ui_state(Some(&storage), 1);
+    assert_eq!(restored.last_backup_date.as_deref(), Some("11/18/2026"));
+    assert!(!restored.last_backup_predates_story);
 }
 
 #[test]
@@ -1356,6 +1419,7 @@ fn restarting_with_more_than_two_wallets_keeps_the_previously_selected_wallet() 
             ledger_sort_newest_first: true,
             last_entry_kind: EntryKind::default(),
             last_backup: None,
+            last_backup_predates_story: false,
         },
     );
     let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -1489,6 +1553,7 @@ fn last_entry_kind_restores_into_a_fresh_draft_on_construction() {
             ledger_sort_newest_first: true,
             last_entry_kind: EntryKind::Deposit,
             last_backup: None,
+            last_backup_predates_story: false,
         },
     );
     let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -1616,6 +1681,7 @@ fn ui_state_without_last_entry_kind_field_still_loads_and_defaults_to_deduction(
             ledger_sort_newest_first: false,
             last_entry_kind: EntryKind::Deposit,
             last_backup: None,
+            last_backup_predates_story: false,
         },
     );
 
@@ -3396,6 +3462,7 @@ fn relaunch_restores_wallet_by_index_and_starts_ledger_filters_empty() {
             ledger_sort_newest_first: true,
             last_entry_kind: EntryKind::default(),
             last_backup: None,
+            last_backup_predates_story: false,
         },
     );
     let mut cc = eframe::CreationContext::_new_kittest(egui::Context::default());
@@ -3425,6 +3492,7 @@ fn restore_ui_state_clamps_selected_wallet_to_the_last_wallet() {
             ledger_sort_newest_first: false,
             last_entry_kind: EntryKind::Deposit,
             last_backup: Some("2026-01-02".to_owned()),
+            last_backup_predates_story: false,
         },
     );
 
