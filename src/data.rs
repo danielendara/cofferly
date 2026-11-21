@@ -301,24 +301,30 @@ impl Wallet {
         date: NaiveDate,
         signed_amount: i64,
     ) -> bool {
+        entry_index < self.entries.len() && self.goes_negative_at(entry_index, date, signed_amount)
+    }
+
+    /// Would appending an entry leave the balance below zero at its place in
+    /// date order or anywhere after?
+    pub fn goes_negative_if_added(&self, date: NaiveDate, signed_amount: i64) -> bool {
+        self.goes_negative_at(self.entries.len(), date, signed_amount)
+    }
+
+    fn goes_negative_at(&self, entry_index: usize, date: NaiveDate, signed_amount: i64) -> bool {
         let mut candidates: Vec<(NaiveDate, usize, i64)> = self
             .entries
             .iter()
             .enumerate()
-            .map(|(index, entry)| {
-                if index == entry_index {
-                    (date, index, signed_amount)
-                } else {
-                    (entry.date, index, entry.amount_cents)
-                }
-            })
+            .filter(|&(index, _)| index != entry_index)
+            .map(|(index, entry)| (entry.date, index, entry.amount_cents))
             .collect();
+        candidates.push((date, entry_index, signed_amount));
         candidates.sort_by_key(|&(date, index, _)| (date, index));
 
         let mut balance = self.starting_balance_cents;
         let mut reached = false;
         for (_, index, amount) in candidates {
-            balance = balance.saturating_add(amount);
+            balance = clamp_cents(balance.saturating_add(amount));
             reached |= index == entry_index;
             if reached && balance < 0 {
                 return true;
@@ -903,6 +909,36 @@ mod tests {
         // A money-out correction moved earlier takes an earlier point below zero.
         assert!(wallet.goes_negative_with(0, jul(1), -100));
         assert!(!wallet.goes_negative_with(0, jul(10), 1000));
+    }
+
+    #[test]
+    fn goes_negative_if_added_checks_the_new_row_and_later_balances() {
+        let mut wallet = backdated_wallet();
+        let jul = |day| NaiveDate::from_ymd_opt(2026, 7, day).unwrap();
+        wallet.entries.truncate(1);
+
+        assert!(wallet.goes_negative_if_added(jul(1), -500));
+        assert!(!wallet.goes_negative_if_added(jul(11), -500));
+        assert!(!wallet.goes_negative_if_added(jul(10), -500));
+
+        wallet.entries[0].date = jul(20);
+        wallet.entries.extend([
+            Entry {
+                date: jul(5),
+                description: "Allowance".to_owned(),
+                amount_cents: 500,
+            },
+            Entry {
+                date: jul(15),
+                description: "Snack".to_owned(),
+                amount_cents: -500,
+            },
+        ]);
+        assert!(wallet.goes_negative_if_added(jul(10), -500));
+
+        wallet.entries.clear();
+        assert!(wallet.goes_negative_if_added(jul(10), -500));
+        assert!(!wallet.goes_negative_if_added(jul(10), 500));
     }
 
     #[test]
