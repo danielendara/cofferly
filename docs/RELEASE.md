@@ -4,10 +4,13 @@ Use this checklist when preparing a Cofferly release.
 
 ## Local Checks
 
+Match what the Release workflow runs before it builds (`.github/workflows/release.yml`: `cargo fmt`, `cargo test`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo audit` via `rustsec/audit-check`, then `cargo build --release`):
+
 ```powershell
 cargo fmt -- --check
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
+cargo audit
 cargo build --release --locked
 .\scripts\package-windows.ps1
 ```
@@ -39,7 +42,7 @@ The repository includes `installer/Cofferly.iss` for Inno Setup.
 
 ### CI (preferred)
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. A read-only `windows` job builds the portable zip and compiles the installer with Inno Setup, then uploads them as workflow artifacts; a separate `publish` job (tag pushes only) downloads those artifacts and attaches them to the GitHub Release. Starting the workflow manually via `workflow_dispatch` runs the build job only (artifacts, no Release attach). The version is resolved once per run in the build job: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
+Pushing a `v*` tag runs `.github/workflows/release.yml`. The `windows` job (workflow-level `contents: read`) runs format, test, Clippy, and `cargo audit` (same gates as CI on Linux) before the release build, then packages the portable zip and compiles the installer with Inno Setup and uploads workflow artifacts; a separate `publish` job (tag pushes only, `contents: write`) downloads those artifacts and attaches them to the GitHub Release. Starting the workflow manually via `workflow_dispatch` runs the build job only (artifacts, no Release attach). The version is resolved once per run in the build job: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
 
 ### Local
 

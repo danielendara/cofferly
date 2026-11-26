@@ -42,7 +42,7 @@ jobs:
 
       - name: Workflow security checks
         if: runner.os == 'Linux'
-        run: python3 scripts/check_security_workflows.py
+        run: python3 scripts/check_security_workflows.py --fixtures
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
@@ -98,11 +98,7 @@ jobs:
 
       - name: Generate coverage
         run: |
-          # Modest floor vs 2026-09-05 baseline of 76.11% line coverage
-          # after excluding UI-only views.rs (~2% covered)
-          # and maintainer screenshot capture.rs (0%). Those files dominate
-          # uncovered lines (~54% overall) and would hide a drop in money,
-          # story unlock, or ledger tests.
+          # Floor 74% with views/capture excluded — see AGENTS.md and scripts/verify.sh.
           ignore='(^|/)src/(views|capture)\.rs$'
           cargo llvm-cov --locked --html --output-dir coverage \
             --ignore-filename-regex "$ignore"
