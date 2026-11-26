@@ -1948,7 +1948,6 @@ fn selected_export_status_names_filter_and_count_only_when_set() {
     app.ledger_filter = "  snack  ".to_owned();
     let query = app.selected_description_filter().expect("active filter");
     assert_eq!(query, "snack");
-    assert_eq!(app.filtered_entry_count(&query), 1);
 
     let one = filtered_export_opened_status("CSV ledger", Path::new("ledger.csv"), &query, 1);
     assert!(one.contains("snack"));

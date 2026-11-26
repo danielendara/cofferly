@@ -14,7 +14,7 @@ pub fn write_printable_ledger(
     wallets: &[Wallet],
     printed_on: NaiveDate,
 ) -> Result<PathBuf, String> {
-    write_printable_ledger_filtered(path, wallets, "", printed_on)
+    write_printable_ledger_filtered(path, wallets, "", printed_on).map(|(path, _)| path)
 }
 
 /// Like [`write_printable_ledger`], but a non-empty `description_filter` keeps
@@ -25,13 +25,14 @@ pub fn write_printable_ledger_filtered(
     wallets: &[Wallet],
     description_filter: &str,
     printed_on: NaiveDate,
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, usize), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
     let printed = format_ledger_date(printed_on);
     let mut body = String::new();
+    let mut matching_entry_count = 0_usize;
     for wallet in wallets {
         let mut header = format!(
             "<section><h1>{}</h1><p class=\"balance\">Current balance: {}</p><p class=\"printed\">Printed {}</p>",
@@ -50,6 +51,7 @@ pub fn write_printable_ledger_filtered(
 
         let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
         let summary = ledger_filter_summary(&owned_rows, description_filter);
+        matching_entry_count += summary.matching_entry_count;
         if !description_filter.trim().is_empty() {
             let _ = write!(
                 body,
@@ -114,7 +116,7 @@ td:last-child, th:last-child, td:nth-child(3), th:nth-child(3) {{ text-align: ri
     );
 
     fs::write(path, html).map_err(|err| err.to_string())?;
-    Ok(path.clone())
+    Ok((path.clone(), matching_entry_count))
 }
 
 pub fn ledger_file_stem(child_name: &str) -> String {
@@ -266,7 +268,7 @@ mod tests {
         let path = dir.path().join("ledger.html");
         let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
-        let written =
+        let (written, _) =
             write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap();
         let html = std::fs::read_to_string(&written).unwrap();
 
@@ -297,26 +299,23 @@ mod tests {
         let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
         let path = dir.path().join("ledger.html");
-        let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap(),
-        )
-        .unwrap();
+        let (written, _) =
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap();
+        let html = std::fs::read_to_string(written).unwrap();
         assert!(html.contains("Showing 2 of 3 entries matching"));
         assert!(html.contains("Balances include every entry"));
 
         let path = dir.path().join("escaped.html");
-        let html = std::fs::read_to_string(
+        let (written, _) =
             write_printable_ledger_filtered(&path, &wallets[..1], "<b>snack", printed_on())
-                .unwrap(),
-        )
-        .unwrap();
+                .unwrap();
+        let html = std::fs::read_to_string(written).unwrap();
         assert!(html.contains("matching “&lt;b&gt;snack”"));
 
         let path = dir.path().join("blank.html");
-        let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "  ", printed_on()).unwrap(),
-        )
-        .unwrap();
+        let (written, _) =
+            write_printable_ledger_filtered(&path, &wallets[..1], "  ", printed_on()).unwrap();
+        let html = std::fs::read_to_string(written).unwrap();
         assert!(!html.contains("class=\"filter\""));
     }
 
@@ -354,10 +353,9 @@ mod tests {
         assert!(html.contains("<title>Cofferly Ledger – 10/10/2026</title>"));
 
         let path = dir.path().join("filtered.html");
-        let html = std::fs::read_to_string(
-            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap(),
-        )
-        .unwrap();
+        let (written, _) =
+            write_printable_ledger_filtered(&path, &wallets[..1], "snack", printed_on()).unwrap();
+        let html = std::fs::read_to_string(written).unwrap();
         assert!(html.contains("<p class=\"printed\">Printed 10/10/2026</p>"));
         assert!(html.contains("<title>Cofferly Ledger – 10/10/2026</title>"));
     }

@@ -1,5 +1,14 @@
 //! Print and CSV export methods for [`CofferlyApp`].
 
+use std::slice::from_ref;
+
+use chrono::Local;
+
+use crate::export_csv::{write_csv_ledger, write_csv_ledger_filtered};
+use crate::print_html::{
+    ledger_file_stem, write_printable_ledger, write_printable_ledger_filtered,
+};
+
 use super::*;
 
 impl CofferlyApp {
@@ -16,11 +25,16 @@ impl CofferlyApp {
         let filter = self.selected_description_filter();
         match write_printable_ledger_filtered(
             &path,
-            &[self.selected_wallet().clone()],
+            from_ref(self.selected_wallet()),
             filter.as_deref().unwrap_or(""),
             Local::now().date_naive(),
         ) {
-            Ok(path) => self.open_selected_export(path, "printable ledger", filter.as_deref()),
+            Ok((path, matching_count)) => self.open_selected_export(
+                path,
+                "printable ledger",
+                filter.as_deref(),
+                matching_count,
+            ),
             Err(err) => self.set_status_err(format!("Could not create printable ledger: {err}")),
         }
     }
@@ -55,10 +69,12 @@ impl CofferlyApp {
         let filter = self.selected_description_filter();
         match write_csv_ledger_filtered(
             &path,
-            &[self.selected_wallet().clone()],
+            from_ref(self.selected_wallet()),
             filter.as_deref().unwrap_or(""),
         ) {
-            Ok(path) => self.open_selected_export(path, "CSV ledger", filter.as_deref()),
+            Ok((path, matching_count)) => {
+                self.open_selected_export(path, "CSV ledger", filter.as_deref(), matching_count)
+            }
             Err(err) => self.set_status_err(format!("Could not create CSV ledger: {err}")),
         }
     }
@@ -90,22 +106,24 @@ impl CofferlyApp {
         }
     }
 
-    pub(crate) fn filtered_entry_count(&self, query: &str) -> usize {
-        let rows = self
-            .selected_wallet()
-            .ledger_rows_sorted_owned(LedgerSort::OldestFirst);
-        ledger_filter_summary(&rows, query).matching_entry_count
-    }
-
-    fn open_selected_export(&mut self, path: PathBuf, kind: &str, filter: Option<&str>) {
-        let filtered_count = filter.map(|query| self.filtered_entry_count(query));
+    fn open_selected_export(
+        &mut self,
+        path: PathBuf,
+        kind: &str,
+        filter: Option<&str>,
+        matching_count: usize,
+    ) {
         let result = opener::open(&path).map_err(|err| err.to_string());
         let opened = result.is_ok();
         self.apply_export_open_result(path.clone(), kind, result);
         if opened {
-            if let (Some(query), Some(count)) = (filter, filtered_count) {
-                self.status =
-                    Status::success(filtered_export_opened_status(kind, &path, query, count));
+            if let Some(query) = filter {
+                self.status = Status::success(filtered_export_opened_status(
+                    kind,
+                    &path,
+                    query,
+                    matching_count,
+                ));
             }
         }
     }
@@ -176,11 +194,7 @@ pub(crate) fn filtered_export_opened_status(
     filter: &str,
     entry_count: usize,
 ) -> String {
-    let entries = if entry_count == 1 {
-        "1 entry".to_owned()
-    } else {
-        format!("{entry_count} entries")
-    };
+    let entries = allowance_entry_count_label(entry_count);
     format!(
         "Opened {kind} with {entries} included; description filter \"{filter}\" applied. Print or save it from the window that opened, or find it at {}.",
         path.display()
