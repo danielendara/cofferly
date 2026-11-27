@@ -11,6 +11,18 @@ use crate::print_html::{
 
 use super::*;
 
+fn try_open_export_path(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        let _ = path;
+        Ok(())
+    }
+    #[cfg(not(test))]
+    {
+        opener::open(path).map_err(|err| err.to_string())
+    }
+}
+
 impl CofferlyApp {
     pub(crate) fn print_selected_wallet(&mut self) {
         if !self.save_enabled {
@@ -113,7 +125,7 @@ impl CofferlyApp {
         filter: Option<&str>,
         matching_count: usize,
     ) {
-        let result = opener::open(&path).map_err(|err| err.to_string());
+        let result = try_open_export_path(&path);
         let opened = result.is_ok();
         self.apply_export_open_result(path.clone(), kind, result);
         if opened {
@@ -129,7 +141,7 @@ impl CofferlyApp {
     }
 
     fn open_export_file(&mut self, path: PathBuf, kind: &str) {
-        let result = opener::open(&path).map_err(|err| err.to_string());
+        let result = try_open_export_path(&path);
         self.apply_export_open_result(path, kind, result);
     }
 

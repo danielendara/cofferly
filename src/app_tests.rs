@@ -1965,6 +1965,37 @@ fn selected_export_status_names_filter_and_count_only_when_set() {
 }
 
 #[test]
+fn filtered_selected_exports_show_writer_match_count_in_status() {
+    let (mut app, _dir) = test_app();
+    app.data.wallets[0].starting_balance_cents = 1_000;
+    app.data.wallets[0].entries = vec![
+        Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+            description: "Weekly allowance".to_owned(),
+            amount_cents: 500,
+        },
+        Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+            description: "Snack".to_owned(),
+            amount_cents: -200,
+        },
+    ];
+    app.ledger_filter = "  snack  ".to_owned();
+
+    app.export_selected_wallet_csv();
+    assert_eq!(app.status.severity, StatusSeverity::Success);
+    assert!(app.status.text.contains("1 entry"));
+    assert!(app.status.text.contains("snack"));
+    assert!(app.status.text.contains("CSV ledger"));
+
+    app.print_selected_wallet();
+    assert_eq!(app.status.severity, StatusSeverity::Success);
+    assert!(app.status.text.contains("1 entry"));
+    assert!(app.status.text.contains("snack"));
+    assert!(app.status.text.contains("printable ledger"));
+}
+
+#[test]
 fn status_live_region_follows_severity_and_keeps_its_id() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
