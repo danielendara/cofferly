@@ -4,7 +4,7 @@ Use this checklist when preparing a Cofferly release.
 
 ## Local Checks
 
-Match what the Release workflow runs before it builds (`.github/workflows/release.yml`: `cargo fmt`, `cargo test`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo audit` via `rustsec/audit-check`, then `cargo build --release`):
+Match what the Release workflow runs: advisory check in `.github/workflows/release.yml` lines 13–29 (`audit` on `ubuntu-latest`); Windows build at lines 31–33 (`needs: audit`) then fmt/test/Clippy (e.g. lines 62–69) before `cargo build --release`:
 
 ```powershell
 cargo fmt -- --check
@@ -42,7 +42,7 @@ The repository includes `installer/Cofferly.iss` for Inno Setup.
 
 ### CI (preferred)
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. The `windows` job (workflow-level `contents: read`) runs format, test, Clippy, and `cargo audit` (same gates as CI on Linux) before the release build, then packages the portable zip and compiles the installer with Inno Setup and uploads workflow artifacts; a separate `publish` job (tag pushes only, `contents: write`) downloads those artifacts and attaches them to the GitHub Release. Starting the workflow manually via `workflow_dispatch` runs the build job only (artifacts, no Release attach). The version is resolved once per run in the build job: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
+Pushing a `v*` tag runs `.github/workflows/release.yml`. Per lines 13–29 an `audit` job on `ubuntu-latest` runs the advisory check; lines 31–33 gate `windows` on `audit`. The `windows` job (workflow-level `contents: read` at line 10) runs format, test, and Clippy before the release build, then packages the portable zip and compiles the installer with Inno Setup and uploads workflow artifacts; a separate `publish` job (tag pushes only, `contents: write`) downloads those artifacts and attaches them to the GitHub Release. Starting the workflow manually via `workflow_dispatch` runs the build pipeline only (artifacts, no Release attach). The version is resolved once per run in the build job: a `v*` tag with the `v` stripped, otherwise the `Cargo.toml` version.
 
 ### Local
 

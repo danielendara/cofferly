@@ -42,6 +42,10 @@ jobs:
 
       - name: Workflow security checks
         if: runner.os == 'Linux'
+        run: python3 scripts/check_security_workflows.py
+
+      - name: Workflow security fixture checks
+        if: runner.os == 'Linux'
         run: python3 scripts/check_security_workflows.py --fixtures
 
       - name: Install Rust

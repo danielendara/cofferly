@@ -10,8 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Advisory ignores: `.cargo/audit.toml` (single source for rustsec/audit-check).
+      - name: cargo audit
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   windows:
     name: Windows build
+    needs: audit
     runs-on: windows-latest
 
     steps:
@@ -48,12 +67,6 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-
-      # Advisory ignores: `.cargo/audit.toml` (single source for rustsec/audit-check).
-      - name: cargo audit
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build release
         run: cargo build --release --locked
