@@ -1948,7 +1948,6 @@ fn selected_export_status_names_filter_and_count_only_when_set() {
     app.ledger_filter = "  snack  ".to_owned();
     let query = app.selected_description_filter().expect("active filter");
     assert_eq!(query, "snack");
-    assert_eq!(app.filtered_entry_count(&query), 1);
 
     let one = filtered_export_opened_status("CSV ledger", Path::new("ledger.csv"), &query, 1);
     assert!(one.contains("snack"));
@@ -1963,6 +1962,37 @@ fn selected_export_status_names_filter_and_count_only_when_set() {
         filtered_export_opened_status("printable ledger", Path::new("ledger.html"), "nope", 0);
     assert!(none.contains("0 entries"));
     assert!(none.contains("nope"));
+}
+
+#[test]
+fn filtered_selected_exports_show_writer_match_count_in_status() {
+    let (mut app, _dir) = test_app();
+    app.data.wallets[0].starting_balance_cents = 1_000;
+    app.data.wallets[0].entries = vec![
+        Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+            description: "Weekly allowance".to_owned(),
+            amount_cents: 500,
+        },
+        Entry {
+            date: NaiveDate::from_ymd_opt(2026, 6, 9).unwrap(),
+            description: "Snack".to_owned(),
+            amount_cents: -200,
+        },
+    ];
+    app.ledger_filter = "  snack  ".to_owned();
+
+    app.export_selected_wallet_csv();
+    assert_eq!(app.status.severity, StatusSeverity::Success);
+    assert!(app.status.text.contains("1 entry"));
+    assert!(app.status.text.contains("snack"));
+    assert!(app.status.text.contains("CSV ledger"));
+
+    app.print_selected_wallet();
+    assert_eq!(app.status.severity, StatusSeverity::Success);
+    assert!(app.status.text.contains("1 entry"));
+    assert!(app.status.text.contains("snack"));
+    assert!(app.status.text.contains("printable ledger"));
 }
 
 #[test]

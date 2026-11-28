@@ -7,7 +7,7 @@ use crate::money::format_money_input;
 /// Write a UTF-8 CSV ledger (with BOM for Excel) to `path`.
 /// Amounts are unformatted decimals so spreadsheets can sum them.
 pub fn write_csv_ledger(path: &PathBuf, wallets: &[Wallet]) -> Result<PathBuf, String> {
-    write_csv_ledger_filtered(path, wallets, "")
+    write_csv_ledger_filtered(path, wallets, "").map(|(path, _)| path)
 }
 
 /// Like [`write_csv_ledger`], but a non-empty `description_filter` keeps only
@@ -17,17 +17,19 @@ pub fn write_csv_ledger_filtered(
     path: &PathBuf,
     wallets: &[Wallet],
     description_filter: &str,
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, usize), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
     let mut csv = String::from('\u{feff}');
     csv.push_str("Wallet,Date,Description,Amount,Balance\r\n");
+    let mut matching_entry_count = 0_usize;
 
     for wallet in wallets {
         let owned_rows = wallet.ledger_rows_sorted_owned(LedgerSort::OldestFirst);
         let summary = ledger_filter_summary(&owned_rows, description_filter);
+        matching_entry_count += summary.matching_entry_count;
         for row in summary.rows {
             csv.push_str(&csv_text_field(&wallet.child_name));
             csv.push(',');
@@ -43,7 +45,7 @@ pub fn write_csv_ledger_filtered(
     }
 
     fs::write(path, csv).map_err(|err| err.to_string())?;
-    Ok(path.clone())
+    Ok((path.clone(), matching_entry_count))
 }
 
 /// Quotes a field per RFC 4180. Does not neutralize formula-trigger characters;
@@ -201,15 +203,25 @@ mod tests {
     }
 
     #[test]
+    fn filtered_csv_returns_matching_entry_count() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.csv");
+        let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
+        let (_, count) = write_csv_ledger_filtered(&path, &wallets[..1], "SNACK").unwrap();
+        let rows = wallets[0].ledger_rows_sorted_owned(LedgerSort::OldestFirst);
+        let expected = ledger_filter_summary(&rows, "SNACK").matching_entry_count;
+        assert_eq!(count, expected);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn filtered_csv_keeps_start_row_full_balance_and_oldest_first_order() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.csv");
         let wallets = crate::data::snack_allowance_bus_fare_test_wallets();
 
-        let csv = std::fs::read_to_string(
-            write_csv_ledger_filtered(&path, &wallets[..1], "SNACK").unwrap(),
-        )
-        .unwrap();
+        let (written_path, _) = write_csv_ledger_filtered(&path, &wallets[..1], "SNACK").unwrap();
+        let csv = std::fs::read_to_string(written_path).unwrap();
         assert!(csv.contains("Starting balance"));
         assert!(csv.contains("Snack early"));
         assert!(csv.contains("Snack late"));
@@ -226,10 +238,8 @@ mod tests {
         assert!(all.contains("Bus fare"));
 
         let empty = dir.path().join("empty-filter.csv");
-        let unfiltered = std::fs::read_to_string(
-            write_csv_ledger_filtered(&empty, &wallets[..1], "  ").unwrap(),
-        )
-        .unwrap();
+        let (unfiltered_path, _) = write_csv_ledger_filtered(&empty, &wallets[..1], "  ").unwrap();
+        let unfiltered = std::fs::read_to_string(unfiltered_path).unwrap();
         assert!(unfiltered.contains("Weekly allowance"));
         assert!(unfiltered.contains("Snack early"));
     }
